@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import requests
+import tempfile
 from together import Together
 from dotenv import load_dotenv
 
@@ -35,11 +36,12 @@ def extract_text():
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
         
-        # Save the uploaded image locally
         image_file = request.files['image']
-        image_path = f"./temp/{image_file.filename}"
-        os.makedirs("./temp", exist_ok=True)
-        image_file.save(image_path)
+        
+        # Use temporary file storage
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+            image_path = temp_file.name
+            image_file.save(image_path)
 
         # Upload image to Imgur and get the public URL
         uploaded_image_url = upload_to_imgur(image_path)
@@ -64,7 +66,7 @@ def extract_text():
             stop=["<|eot_id|>", "<|eom_id|>"]
         )
 
-        extracted_text = response.choices[0].message.content  # ✅ Correct way to access response
+        extracted_text = response.choices[0].message.content
 
         return jsonify({"extracted_text": extracted_text})
 
