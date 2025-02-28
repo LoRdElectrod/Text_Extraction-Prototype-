@@ -8,7 +8,13 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")  # Add your Imgur client ID in .env
+IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
+
+# Ensure API keys are set
+if not TOGETHER_API_KEY:
+    raise ValueError("TOGETHER_API_KEY is missing. Check your .env file.")
+if not IMGUR_CLIENT_ID:
+    raise ValueError("IMGUR_CLIENT_ID is missing. Check your .env file.")
 
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
@@ -20,7 +26,7 @@ def upload_to_imgur(image_path):
     headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
     with open(image_path, "rb") as image_file:
         response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
-    
+
     if response.status_code == 200:
         return response.json()["data"]["link"]  # Get the public URL of the image
     else:
@@ -43,8 +49,11 @@ def extract_text():
             image_path = temp_file.name
             image_file.save(image_path)
 
-        # Upload image to Imgur and get the public URL
-        uploaded_image_url = upload_to_imgur(image_path)
+        try:
+            # Upload image to Imgur and get the public URL
+            uploaded_image_url = upload_to_imgur(image_path)
+        finally:
+            os.remove(image_path)  # Cleanup the temp file
 
         # Send request to Together AI's Vision Model
         response = client.chat.completions.create(
@@ -58,15 +67,14 @@ def extract_text():
                     ]
                 }
             ],
-            max_tokens=None,
+            max_tokens=500,  # Limiting tokens to avoid API errors
             temperature=0.7,
             top_p=0.7,
             top_k=50,
-            repetition_penalty=1,
-            stop=["<|eot_id|>", "<|eom_id|>"]
+            repetition_penalty=1
         )
 
-        extracted_text = response.choices[0].message.content
+        extracted_text = response.choices[0].message.content if response.choices else "No text extracted."
 
         return jsonify({"extracted_text": extracted_text})
 
