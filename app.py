@@ -51,7 +51,7 @@ def extract_text():
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract the text from the image"},
+                        {"type": "text", "text": "Extract the text from the image in a list format where you need to display only the necessary details, like {Name} {Quantity}"},
                         {"type": "image_url", "image_url": {"url": uploaded_image_url}}
                     ]
                 }
