@@ -4,3 +4,4 @@ together
 python-dotenv
 gunicorn
 psycopg2-binary
+fuzzywuzzy
