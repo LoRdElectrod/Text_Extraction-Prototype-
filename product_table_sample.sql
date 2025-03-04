@@ -1,15 +1,13 @@
+-- Create the database (if it doesn't exist)
+CREATE DATABASE medicine_db_new;
 
-SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-START TRANSACTION;
-SET time_zone = "+00:00";
+-- Connect to the database
+\c medicine_db_new;
 
-
-CREATE DATABASE IF NOT EXISTS medicine_db_new;
-USE medicine_db_new;
-
-CREATE TABLE `product_table_new` (
-  `unique_id` int(11) NOT NULL,
-  `medicine` varchar(500) NOT NULL
+-- Create the table
+CREATE TABLE product_table_new (
+    unique_id SERIAL PRIMARY KEY,  -- SERIAL is used for auto-increment in PostgreSQL
+    medicine VARCHAR(500) NOT NULL
 );
 
 --
@@ -1014,3 +1012,14 @@ INSERT INTO `product_table_new` (`unique_id`, `medicine`) VALUES
 (998, 'LINOPLUS 600MG TABLET'),
 (999, 'D3 SHOT 60K CAPSULE'),
 (1000, 'D3 SHOT 60K SACHET');
+
+-- Create an index on the medicine column for faster searches
+CREATE INDEX idx_medicine ON product_table_new (medicine);
+
+-- Grant permissions (if needed)
+-- Replace 'your_user' with the actual PostgreSQL user you want to grant permissions to
+GRANT ALL PRIVILEGES ON TABLE product_table_new TO your_user;
+GRANT USAGE, SELECT ON SEQUENCE product_table_new_unique_id_seq TO your_user;
+
+-- Analyze the table to update statistics (for query optimization)
+ANALYZE product_table_new;
