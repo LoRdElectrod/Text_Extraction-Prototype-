@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import requests
-import mysql.connector
+import psycopg2  # Replace mysql.connector with psycopg2
 import re  # Import regex for better text parsing
 from together import Together
 from dotenv import load_dotenv
@@ -34,7 +34,7 @@ def upload_to_imgur(image_path):
 
 # Function to connect to the database
 def get_db_connection():
-    return mysql.connector.connect(
+    return psycopg2.connect(
         host=DB_HOST,
         user=DB_USER,
         password=DB_PASSWORD,
@@ -44,22 +44,22 @@ def get_db_connection():
 # Function to fetch all medicine names from the database
 def fetch_all_medicines():
     connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
+    cursor = connection.cursor()
     cursor.execute("SELECT medicine FROM product_table_new")
     results = cursor.fetchall()
     cursor.close()
     connection.close()
-    return [result['medicine'] for result in results]
+    return [result[0] for result in results]  # PostgreSQL returns tuples, so use index 0
 
 # Function to search for medicine in the database
 def search_medicine_in_db(medicine_name):
     connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine LIKE %s", (f"%{medicine_name}%",))
+    cursor = connection.cursor()
+    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine ILIKE %s", (f"%{medicine_name}%",))
     results = cursor.fetchall()
     cursor.close()
     connection.close()
-    return [result['medicine'] for result in results]
+    return [result[0] for result in results]  # PostgreSQL returns tuples, so use index 0
 
 # Function to get similar medicine names using fuzzy matching
 def get_similar_medicines(medicine_name, all_medicines, limit=5):
