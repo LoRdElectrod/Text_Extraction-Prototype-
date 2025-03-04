@@ -1,20 +1,20 @@
-from flask import Flask, request, jsonify, render_template
 import os
+import psycopg2
+from flask import Flask, request, jsonify, render_template
 import requests
-import psycopg2  # Replace mysql.connector with psycopg2
-import re  # Import regex for better text parsing
 from together import Together
 from dotenv import load_dotenv
-from fuzzywuzzy import process  # Import fuzzywuzzy for string matching
+from fuzzywuzzy import process
 
 # Load environment variables
 load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")  # Add your Imgur client ID in .env
+IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
+DB_PORT = os.getenv("DB_PORT")
 
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
@@ -38,8 +38,37 @@ def get_db_connection():
         host=DB_HOST,
         user=DB_USER,
         password=DB_PASSWORD,
-        database=DB_NAME
+        database=DB_NAME,
+        port=DB_PORT
     )
+
+#Initialisation Db
+def initialize_database():
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        # Check if the table already exists
+        cursor.execute("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'product_table_new');")
+        table_exists = cursor.fetchone()[0]
+
+        if not table_exists:
+            # Read the .sql file and execute it
+            with open("product_table_sample.sql", "r") as sql_file:
+                sql_script = sql_file.read()
+                cursor.execute(sql_script)
+                connection.commit()
+                print("Database initialized successfully!")
+        else:
+            print("Database already initialized.")
+
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+
+# Initialize the database when the app starts
+initialize_database()
 
 # Function to fetch all medicine names from the database
 def fetch_all_medicines():
