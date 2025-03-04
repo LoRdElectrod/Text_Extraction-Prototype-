@@ -1,15 +1,14 @@
 -- Create the database (if it doesn't exist)
-CREATE DATABASE medicine_db_new;
+CREATE DATABASE IF NOT EXISTS medicine_db_new;
 
--- Connect to the database
-\c medicine_db_new;
+-- Connect to the database (not needed in the script, handled by your app)
+-- Use the database (not needed in the script, handled by your app)
 
 -- Create the table
-CREATE TABLE product_table_new (
-    unique_id SERIAL PRIMARY KEY,  -- SERIAL is used for auto-increment in PostgreSQL
+CREATE TABLE IF NOT EXISTS product_table_new (
+    unique_id SERIAL PRIMARY KEY,
     medicine VARCHAR(500) NOT NULL
 );
-
 --
 -- Dumping data for table `p`
 --
