@@ -1,13 +1,20 @@
 from flask import Flask, request, jsonify, render_template
 import os
 import requests
+import mysql.connector
+import re  # Import regex for better text parsing
 from together import Together
 from dotenv import load_dotenv
+from fuzzywuzzy import process  # Import fuzzywuzzy for string matching
 
 # Load environment variables
 load_dotenv()
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")  # Add your Imgur client ID in .env
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
 
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
@@ -25,12 +32,59 @@ def upload_to_imgur(image_path):
     else:
         raise Exception(f"Imgur upload failed: {response.json()}")
 
+# Function to connect to the database
+def get_db_connection():
+    return mysql.connector.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database=DB_NAME
+    )
+
+# Function to fetch all medicine names from the database
+def fetch_all_medicines():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("SELECT medicine FROM product_table_new")
+    results = cursor.fetchall()
+    cursor.close()
+    connection.close()
+    return [result['medicine'] for result in results]
+
+# Function to search for medicine in the database
+def search_medicine_in_db(medicine_name):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine LIKE %s", (f"%{medicine_name}%",))
+    results = cursor.fetchall()
+    cursor.close()
+    connection.close()
+    return [result['medicine'] for result in results]
+
+# Function to get similar medicine names using fuzzy matching
+def get_similar_medicines(medicine_name, all_medicines, limit=5):
+    # Use fuzzywuzzy to find the closest matches
+    matches = process.extract(medicine_name, all_medicines, limit=limit)
+    return [match[0] for match in matches if match[1] > 50]  # Only return matches with a score > 50
+
+# Function to parse medicine name and quantity
+def parse_medicine_and_quantity(text):
+    # Use regex to extract medicine name and quantity
+    # Example: "Coevein 15" -> ("Coevein", "15")
+    match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
+    if match:
+        medicine_name = match.group(1).strip()  # Extract medicine name
+        quantity = match.group(2).strip()  # Extract quantity
+        return medicine_name, quantity
+    else:
+        return text, "N/A"  # Fallback if regex doesn't match
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/extract-text', methods=['POST'])
-def extract_text():
+@app.route('/process_image', methods=['POST'])
+def process_image():
     try:
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
@@ -51,7 +105,7 @@ def extract_text():
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract the text from the image in a list format where you need to display only the necessary details, like {Name} {Quantity}"},
+                        {"type": "text", "text": "Extract only the medicine name and quantity from the image. The given image will be in the format like, {Medicine name}{x quantity},Return the result in the format: {Medicine Name} {Quantity}. Do not include any additional text or explanations."},
                         {"type": "image_url", "image_url": {"url": uploaded_image_url}}
                     ]
                 }
@@ -64,9 +118,29 @@ def extract_text():
             stop=["<|eot_id|>", "<|eom_id|>"]
         )
 
-        extracted_text = response.choices[0].message.content  # ✅ Correct way to access response
+        extracted_text = response.choices[0].message.content
 
-        return jsonify({"extracted_text": extracted_text})
+        # Parse the extracted text to get medicine name and quantity
+        medicine_name, quantity = parse_medicine_and_quantity(extracted_text)
+
+        # Fetch all medicines from the database for fuzzy matching
+        all_medicines = fetch_all_medicines()
+
+        # Search for the medicine in the database
+        matched_medicines = search_medicine_in_db(medicine_name)
+        matched_medicine = matched_medicines[0] if matched_medicines else "No match found"
+
+        # Get similar medicine names if no exact match is found
+        suggestions = []
+        if matched_medicine == "No match found":
+            suggestions = get_similar_medicines(medicine_name, all_medicines)
+
+        return jsonify({
+            "extracted_medicine": medicine_name,
+            "matched_medicine": matched_medicine,
+            "suggestions": suggestions,
+            "quantity": quantity
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
