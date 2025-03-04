@@ -5,6 +5,7 @@ import requests
 from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
+import re
 
 # Load environment variables
 load_dotenv()
