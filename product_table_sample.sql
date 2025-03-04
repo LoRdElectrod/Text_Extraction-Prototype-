@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS product_table_new (
 -- Dumping data for table `p`
 --
 
-INSERT INTO `product_table_new` (`unique_id`, `medicine`) VALUES
+INSERT INTO product_table_new (unique_id, medicine) VALUES
 (1, 'AIROL 0.025% CREAM'),
 (2, 'NADERM RF 0.025%/0.5%/1% CREAM'),
 (3, 'PROFEN 0.03% EYE DROPS'),
@@ -1017,8 +1017,8 @@ CREATE INDEX idx_medicine ON product_table_new (medicine);
 
 -- Grant permissions (if needed)
 -- Replace 'your_user' with the actual PostgreSQL user you want to grant permissions to
-GRANT ALL PRIVILEGES ON TABLE product_table_new TO your_user;
-GRANT USAGE, SELECT ON SEQUENCE product_table_new_unique_id_seq TO your_user;
+GRANT ALL PRIVILEGES ON TABLE product_table_new TO postgres;
+GRANT USAGE, SELECT ON SEQUENCE product_table_new_unique_id_seq TO postgres;
 
 -- Analyze the table to update statistics (for query optimization)
 ANALYZE product_table_new;
