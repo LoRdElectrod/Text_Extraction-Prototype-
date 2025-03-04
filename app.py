@@ -54,7 +54,7 @@ def initialize_database():
 
         if not table_exists:
             # Read the .sql file and execute it
-            with open("medicine_db_new.sql", "r") as sql_file:
+            with open("product_table_sample.sql", "r") as sql_file:
                 sql_script = sql_file.read()
                 cursor.execute(sql_script)
                 connection.commit()
