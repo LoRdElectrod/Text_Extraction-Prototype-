@@ -1,5 +1,5 @@
 -- Create the database (if it doesn't exist)
-CREATE DATABASE IF NOT EXISTS medicine_db_new;
+-- CREATE DATABASE IF NOT EXISTS medicine_db_new;
 
 -- Connect to the database (not needed in the script, handled by your app)
 -- Use the database (not needed in the script, handled by your app)
