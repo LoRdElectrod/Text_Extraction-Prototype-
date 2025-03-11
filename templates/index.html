@@ -6,32 +6,61 @@
     <title>Medicine OCR</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen">
+<body class="bg-gradient-to-r from-blue-50 to-blue-100 flex flex-col items-center justify-center min-h-screen p-6">
     
-    <div class="bg-white p-6 rounded-lg shadow-md w-full max-w-4xl">
-        <h2 class="text-2xl font-bold mb-4 text-center">Upload Prescription</h2>
+    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-4xl">
+        <h2 class="text-3xl font-bold text-blue-600 mb-6 text-center">Upload Prescription</h2>
 
         <!-- Form for uploading an image file -->
-        <form id="uploadForm" enctype="multipart/form-data">
-            <input type="file" id="imageFile" name="image" accept=".jpg, .jpeg" class="mb-4 block w-full border p-2 rounded">
-            <button type="submit" class="bg-blue-500 text-white py-2 px-4 rounded w-full">Extract Medicine Names</button>
+        <form id="uploadForm" class="space-y-4" enctype="multipart/form-data">
+            <input type="file" id="imageFile" name="image" accept=".jpg, .jpeg" class="block w-full border border-gray-300 p-3 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">Extract Medicine Names</button>
         </form>
 
-        <div id="loading" class="hidden text-center text-gray-600 mt-4">Processing...</div>
+        <!-- Button to view cart -->
+        <button onclick="openCartPage()" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">
+            View Cart
+        </button>
 
-        <div id="resultContainer" class="mt-4 hidden">
-            <h3 class="text-xl font-semibold">Extracted Medicines:</h3>
-            <table class="w-full mt-2 border-collapse border border-gray-300">
-                <thead>
-                    <tr class="bg-gray-200">
-                        <th class="border px-4 py-2">Extracted Name</th>
-                        <th class="border px-4 py-2">Database Match</th>
-                        <th class="border px-4 py-2">Suggestions</th>
-                        <th class="border px-4 py-2">Quantity</th>
-                    </tr>
-                </thead>
-                <tbody id="resultTable"></tbody>
-            </table>
+        <div id="loading" class="hidden text-center text-gray-600 mt-4 text-lg">Processing...</div>
+
+        <div id="resultContainer" class="mt-6 hidden bg-gray-50 p-6 rounded-lg shadow-lg">
+            <h3 class="text-xl font-semibold text-gray-800 mb-3">Extracted Medicines:</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse border border-gray-300 shadow-sm rounded-lg">
+                    <thead>
+                        <tr class="bg-blue-100 text-gray-700">
+                            <th class="border px-4 py-2">Extracted Name</th>
+                            <th class="border px-4 py-2">Database Match</th>
+                            <th class="border px-4 py-2">Suggestions</th>
+                            <th class="border px-4 py-2">Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cart Page (Hidden by default) -->
+    <div id="cartPage" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center p-6">
+        <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] overflow-y-auto">
+            <h2 class="text-3xl font-bold text-blue-600 mb-6 text-center">Your Cart</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse border border-gray-300 shadow-sm rounded-lg">
+                    <thead>
+                        <tr class="bg-blue-100 text-gray-700">
+                            <th class="border px-4 py-2">Medicine</th>
+                            <th class="border px-4 py-2">Quantity</th>
+                            <th class="border px-4 py-2">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cartTable"></tbody>
+                </table>
+            </div>
+            <button onclick="closeCartPage()" class="mt-6 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">
+                Close Cart
+            </button>
         </div>
     </div>
 
@@ -66,24 +95,83 @@
                 }
 
                 const resultTable = document.getElementById("resultTable");
-                resultTable.innerHTML = "";  // Clear previous results
-                
-                const row = document.createElement("tr");
-                row.innerHTML = `
-                    <td class="border px-4 py-2">${data.extracted_medicine}</td>
-                    <td class="border px-4 py-2">${data.matched_medicine}</td>
-                    <td class="border px-4 py-2">${Array.isArray(data.suggestions) ? data.suggestions.join(", ") : "None"}</td>
-                    <td class="border px-4 py-2">${data.quantity}</td>
-                `;
-                resultTable.appendChild(row);
+                resultTable.innerHTML = "";
+
+                data.results.forEach(item => {
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td class="border px-4 py-2">${item.extracted_medicine}</td>
+                        <td class="border px-4 py-2">${item.matched_medicine}</td>
+                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) ? item.suggestions.join(", ") : "None"}</td>
+                        <td class="border px-4 py-2">${item.quantity}</td>
+                    `;
+                    resultTable.appendChild(row);
+                });
 
                 document.getElementById("resultContainer").classList.remove("hidden");
+                fetchCart(); // Update the cart after adding items
 
             } catch (error) {
                 alert("Error processing request.");
                 console.error(error);
             }
         });
+
+        // Function to open the cart page
+        function openCartPage() {
+            document.getElementById("cartPage").classList.remove("hidden");
+            fetchCart(); // Fetch and display the cart items
+        }
+
+        // Function to close the cart page
+        function closeCartPage() {
+            document.getElementById("cartPage").classList.add("hidden");
+        }
+
+        // Function to update the cart table
+        function updateCartTable(cart) {
+            const cartTable = document.getElementById("cartTable");
+            cartTable.innerHTML = "";
+            
+            cart.forEach((item, index) => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td class="border px-4 py-2">${item.medicine}</td>
+                    <td class="border px-4 py-2">${item.quantity}</td>
+                    <td class="border px-4 py-2">
+                        <button onclick="removeFromCart(${index})" class="bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded-lg transition duration-300">Remove</button>
+                    </td>
+                `;
+                cartTable.appendChild(row);
+            });
+        }
+
+        // Function to remove an item from the cart
+        async function removeFromCart(index) {
+            try {
+                const response = await fetch(`/remove_from_cart/${index}`, {
+                    method: "DELETE",
+                });
+                const data = await response.json();
+                updateCartTable(data.cart); // Update the cart table after removal
+            } catch (error) {
+                console.error("Error removing item from cart:", error);
+            }
+        }
+
+        // Function to fetch the cart
+        async function fetchCart() {
+            try {
+                const response = await fetch("/get_cart");
+                const data = await response.json();
+                updateCartTable(data.cart);
+            } catch (error) {
+                console.error("Error fetching cart:", error);
+            }
+        }
+
+        // Fetch cart on page load
+        fetchCart();
     </script>
 
 </body>
