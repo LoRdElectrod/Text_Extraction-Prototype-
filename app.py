@@ -84,30 +84,66 @@ def fetch_all_medicines():
 
 # Function to search for medicine in the database
 def search_medicine_in_db(medicine_name):
+    first_word = medicine_name.split()[0]  # Take the first word for better matching
+
     connection = get_db_connection()
-    cursor = connection.cursor()
-    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine ILIKE %s", (f"%{medicine_name}%",))
+    cursor = connection.cursor(dictionary=True)
+    
+    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine LIKE %s", (f"{first_word}%",))
     results = cursor.fetchall()
+    
     cursor.close()
     connection.close()
-    return [result[0] for result in results]  # PostgreSQL returns tuples, so use index 0
+
+    return [result['medicine'] for result in results]
+
+def clean_medicine_name(medicine_name):
+    """ Remove unwanted suffixes like 'ST ST', numbers, and special characters """
+    medicine_name = medicine_name.lower().strip()
+    medicine_name = re.sub(r'\b(st|ml|kg|mg|tablet|capsule|syrup)\b', '', medicine_name)  # Remove common suffixes
+    medicine_name = re.sub(r'[^a-zA-Z0-9\s]', '', medicine_name)  # Remove special chars
+    medicine_name = re.sub(r'\s+', ' ', medicine_name).strip()  # Remove extra spaces
+    return medicine_name
+
 
 # Function to get similar medicine names using fuzzy matching
-def get_similar_medicines(medicine_name, all_medicines, limit=5):
-    # Use fuzzywuzzy to find the closest matches
-    matches = process.extract(medicine_name, all_medicines, limit=limit)
-    return [match[0] for match in matches if match[1] > 50]  # Only return matches with a score > 50
+def get_similar_medicines(medicine_name, all_medicines, limit=3, threshold=50):
+    if not medicine_name or not all_medicines:
+        return []
+
+    medicine_name = medicine_name.lower()
+    all_medicines = [med.lower() for med in all_medicines]
+
+    first_three_chars = medicine_name[:3]  # Take the first 3 letters
+
+    # Filter medicines that start with the same 3 characters
+    filtered_medicines = [med for med in all_medicines if med.startswith(first_three_chars)]
+
+    if not filtered_medicines:
+        return []  
+
+    # Apply fuzzy matching on filtered results
+    matches = process.extract(medicine_name, filtered_medicines, limit=limit)
+
+    # Filter matches based on similarity threshold
+    similar_medicines = [match[0] for match in matches if match[1] >= threshold]
+
+    return similar_medicines
+
 
 # Function to parse medicine name and quantity
-# Function to parse medicine name and quantity
 def parse_medicine_and_quantity(text):
-    match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
+    # Remove unwanted symbols (*, -, etc.)
+    cleaned_text = re.sub(r"[^a-zA-Z\s]", "", text).strip()
+    
+    # Extract medicine name and quantity
+    match = re.match(r"([a-zA-Z\s]+)\s*(\d+)?", cleaned_text)
     if match:
         medicine_name = match.group(1).strip()
-        quantity = match.group(2).strip()
+        quantity = match.group(2).strip() if match.group(2) else "1"
         return medicine_name, quantity
     else:
-        return text, "1"
+        return cleaned_text, "1"
 
 @app.route('/')
 def index():
