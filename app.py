@@ -76,23 +76,25 @@ def parse_medicine_and_quantity(text):
 # Function to get suggestions based on internal character patterns
 
 def get_relevant_suggestions(extracted_name, all_medicines, limit=5):
-    extracted_name = extracted_name.lower()
+    extracted_name = extracted_name.lower().strip()
 
     # **Step 1: Exact Match Check**
-    exact_match = [med for med in all_medicines if extracted_name == med.lower()]
+    exact_match = next((med for med in all_medicines if extracted_name == med.lower()), None)
     if exact_match:
-        return exact_match[0], exact_match  # If exact match exists, return it
+        return exact_match, [exact_match]  # Exact match found, no need for suggestions
 
-    # **Step 2: Generate Phonetic Code (Metaphone)**
+    # **Step 2: Fuzzy Matching**
+    fuzzy_matches = rapid_process.extract(extracted_name, all_medicines, scorer=rapid_fuzz.WRatio, limit=limit)
+    fuzzy_matches = [match[0] for match in fuzzy_matches if match[1] >= 70]  # Only keep high-confidence matches
+
+    # **Step 3: Phonetic Matching**
     extracted_phonetic = doublemetaphone(extracted_name)
-
-    # **Step 3: Compare with Phonetic Matches in DB**
     phonetic_matches = [
         med for med in all_medicines 
         if any(code in doublemetaphone(med.lower()) for code in extracted_phonetic if code)
     ]
 
-    # **Step 4: Find n-gram similarity (character sequence patterns)**
+    # **Step 4: N-gram Similarity for OCR Errors**
     def get_ngrams(word, n=3):
         return ["".join(word[i:i+n]) for i in range(len(word)-n+1)]
 
@@ -102,18 +104,20 @@ def get_relevant_suggestions(extracted_name, all_medicines, limit=5):
         if sum((Counter(get_ngrams(med.lower())) & extracted_ngrams).values()) > 2
     ]
 
-    # **Step 5: Use Weighted Fuzzy Matching**
-    fuzzy_matches = rapid_process.extract(extracted_name, all_medicines, scorer=rapid_fuzz.WRatio, limit=limit)
-    fuzzy_matches = [match[0] for match in fuzzy_matches if match[1] >= 65]
+    # **Step 5: Merge Matches & Remove Duplicates**
+    combined_matches = list(set(fuzzy_matches + phonetic_matches + ngram_matches))
 
-    # **Step 6: Combine All Matches & Remove Duplicates**
-    combined_matches = list(set(phonetic_matches + ngram_matches + fuzzy_matches))
+    # **Step 6: Sort Based on Fuzzy Score**
+    sorted_matches = sorted(
+        combined_matches, 
+        key=lambda x: rapid_fuzz.WRatio(extracted_name, x), 
+        reverse=True
+    )[:limit]
 
     # **Step 7: Select the Best Match**
-    best_match = fuzzy_matches[0] if fuzzy_matches else (phonetic_matches[0] if phonetic_matches else None)
+    best_match = sorted_matches[0] if sorted_matches else None
 
-    return best_match, combined_matches[:limit]  # Return best match and top suggestions
-
+    return best_match, sorted_matches
 @app.route('/')
 def index():
     return render_template('index.html')
