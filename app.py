@@ -23,6 +23,7 @@ client = Together(api_key=TOGETHER_API_KEY)
 app = Flask(__name__, template_folder="templates")
 
 cart = []
+
 # Function to upload image to Imgur
 def upload_to_imgur(image_path):
     headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
@@ -30,7 +31,7 @@ def upload_to_imgur(image_path):
         response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
     
     if response.status_code == 200:
-        return response.json()["data"]["link"]  # Get the public URL of the image
+        return response.json()["data"]["link"]
     else:
         raise Exception(f"Imgur upload failed: {response.json()}")
 
@@ -44,35 +45,7 @@ def get_db_connection():
         port=DB_PORT
     )
 
-#Initialisation Db
-def initialize_database():
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-
-        # Check if the table already exists
-        cursor.execute("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'product_table_new');")
-        table_exists = cursor.fetchone()[0]
-
-        if not table_exists:
-            # Read the .sql file and execute it
-            with open("product_table_sample.sql", "r") as sql_file:
-                sql_script = sql_file.read()
-                cursor.execute(sql_script)
-                connection.commit()
-                print("Database initialized successfully!")
-        else:
-            print("Database already initialized.")
-
-        cursor.close()
-        connection.close()
-    except Exception as e:
-        print(f"Error initializing database: {e}")
-
-# Initialize the database when the app starts
-initialize_database()
-
-# Function to fetch all medicine names from the database
+# Fetch all medicine names from DB
 def fetch_all_medicines():
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -80,25 +53,13 @@ def fetch_all_medicines():
     results = cursor.fetchall()
     cursor.close()
     connection.close()
-    return [result[0] for result in results]  # PostgreSQL returns tuples, so use index 0
+    return [result[0] for result in results]  # Extract names as list
 
-# Function to search for medicine in the database
-def search_medicine_in_db(medicine_name):
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    cursor.execute("SELECT medicine FROM product_table_new WHERE medicine ILIKE %s", (f"%{medicine_name}%",))
-    results = cursor.fetchall()
-    cursor.close()
-    connection.close()
-    return [result[0] for result in results]  # PostgreSQL returns tuples, so use index 0
+# Function to clean extracted text (remove garbage symbols)
+def clean_extracted_text(text):
+    text = re.sub(r"^[^a-zA-Z]+", "", text)  # Remove leading special characters
+    return text.strip()
 
-# Function to get similar medicine names using fuzzy matching
-def get_similar_medicines(medicine_name, all_medicines, limit=5):
-    # Use fuzzywuzzy to find the closest matches
-    matches = process.extract(medicine_name, all_medicines, limit=limit)
-    return [match[0] for match in matches if match[1] > 50]  # Only return matches with a score > 50
-
-# Function to parse medicine name and quantity
 # Function to parse medicine name and quantity
 def parse_medicine_and_quantity(text):
     match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
@@ -109,6 +70,22 @@ def parse_medicine_and_quantity(text):
     else:
         return text, "1"
 
+# Function to prioritize relevant medicine suggestions
+def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
+    medicine_name = medicine_name.lower()
+
+    # Check first 3, 2, and 1 character matching
+    three_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:3])]
+    two_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:2])]
+    one_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:1])]
+
+    # Fuzzy matching for additional suggestions
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
+
+    # Combine results, prioritizing strong character matches first
+    suggestions = three_char_match[:5] or two_char_match[:5] or one_char_match[:5] or [match[0] for match in fuzzy_matches if match[1] > 50]
+    return list(set(suggestions))  # Remove duplicates
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -118,24 +95,24 @@ def process_image():
     try:
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
-        
-        # Save the uploaded image locally
+
+        # Save the uploaded image
         image_file = request.files['image']
         image_path = f"./temp/{image_file.filename}"
         os.makedirs("./temp", exist_ok=True)
         image_file.save(image_path)
 
-        # Upload image to Imgur and get the public URL
+        # Upload to Imgur
         uploaded_image_url = upload_to_imgur(image_path)
 
-        # Send request to Together AI's Vision Model
+        # Send request to Together AI
         response = client.chat.completions.create(
             model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract all medicine names and quantities from the image. Return the result as a list in the format: {Medicine Name} {Quantity}. Separate each item with a new line."},
+                        {"type": "text", "text": "Extract all medicine names and quantities from the image. Format: {Medicine Name} {Quantity}"},
                         {"type": "image_url", "image_url": {"url": uploaded_image_url}}
                     ]
                 }
@@ -149,27 +126,29 @@ def process_image():
         )
 
         extracted_text = response.choices[0].message.content
-
-        # Split the extracted text into individual items
         items = extracted_text.strip().split("\n")
 
-        # Fetch all medicines from the database for fuzzy matching
+        # Fetch all medicine names from DB
         all_medicines = fetch_all_medicines()
 
         results = []
         for item in items:
-            medicine_name, quantity = parse_medicine_and_quantity(item)
+            clean_text = clean_extracted_text(item)  # Remove unwanted symbols
+            medicine_name, quantity = parse_medicine_and_quantity(clean_text)
 
-            # Search for the medicine in the database
-            matched_medicines = search_medicine_in_db(medicine_name)
+            # Match using only the first word if it's multi-word
+            first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
+
+            # Search for exact matches
+            matched_medicines = [med for med in all_medicines if first_word.lower() in med.lower()]
             matched_medicine = matched_medicines[0] if matched_medicines else "No match found"
 
-            # Get similar medicine names if no exact match is found
+            # Get suggestions based on prioritized rules
             suggestions = []
             if matched_medicine == "No match found":
-                suggestions = get_similar_medicines(medicine_name, all_medicines)
+                suggestions = get_relevant_suggestions(first_word, all_medicines)
 
-            # Add to cart if the medicine is found in the database
+            # Add to cart if a match is found
             if matched_medicine != "No match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity})
 
