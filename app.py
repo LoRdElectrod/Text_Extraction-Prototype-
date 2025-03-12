@@ -84,24 +84,36 @@ def get_phonetic_code(word):
     return jellyfish.metaphone(word)
 
 # Function to prioritize relevant medicine suggestions
+from fuzzywuzzy import process
+from metaphone import doublemetaphone  # Import Metaphone Algorithm
+
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
 
-    # 1. Try exact prefix matching (first 3, 2, or 1 characters)
+    # 1. Standard Prefix Matching (First 3, 2, and 1 characters)
     three_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:3])]
     two_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:2])]
     one_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:1])]
 
-    # 2. Use fuzzy matching for broader comparison
+    # 2. Fuzzy Matching
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
     fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 50]
 
-    # 3. Handle incorrect first character case
+    # 3. Handle First Character Mistakes (Look at Internal Patterns)
     without_first_char = medicine_name[1:] if len(medicine_name) > 1 else medicine_name
     similar_names = [med for med in all_medicines if without_first_char in med.lower()]
-    
-    # 4. Combine results: Prioritize exact matches > similar patterns > fuzzy matches
-    suggestions = (three_char_match[:5] or two_char_match[:5] or one_char_match[:5] or similar_names[:5] or fuzzy_suggestions)
+
+    # 4. Use Metaphone Algorithm for Phonetic Similarity
+    med_phonetic = doublemetaphone(medicine_name)
+    phonetic_matches = [
+        med for med in all_medicines if any(p in doublemetaphone(med) for p in med_phonetic)
+    ]
+
+    # 5. Combine all methods (Priority Order: Prefix → Phonetic → Internal → Fuzzy)
+    suggestions = (
+        three_char_match[:5] or two_char_match[:5] or one_char_match[:5] or 
+        phonetic_matches[:5] or similar_names[:5] or fuzzy_suggestions
+    )
 
     return list(set(suggestions))  # Remove duplicates
 
