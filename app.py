@@ -75,7 +75,7 @@ def parse_medicine_and_quantity(text):
 
 # Function to get suggestions based on internal character patterns
 
-def get_best_match_and_suggestions(extracted_name, all_medicines, limit=5):
+def get_relevant_suggestions(extracted_name, all_medicines, limit=5):
     extracted_name = extracted_name.lower()
 
     # **Step 1: Exact Match Check**
