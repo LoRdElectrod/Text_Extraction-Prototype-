@@ -45,6 +45,17 @@ def fetch_all_medicines():
     connection.close()
     return [result[0] for result in results]
 
+def upload_to_imgur(image_path):
+    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
+    with open(image_path, "rb") as image_file:
+        image_data = {"image": image_file.read()}
+        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files=image_data)
+    
+    if response.status_code == 200:
+        return response.json()["data"]["link"]
+    else:
+        raise Exception(f"Failed to upload image to Imgur: {response.text}")
+
 # Function to clean extracted text
 def clean_extracted_text(text):
     text = re.sub(r"^[^a-zA-Z]+", "", text)  # Remove leading special characters
