@@ -22,6 +22,7 @@ client = Together(api_key=TOGETHER_API_KEY)
 
 app = Flask(__name__, template_folder="templates")
 
+cart = []
 # Function to upload image to Imgur
 def upload_to_imgur(image_path):
     headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
