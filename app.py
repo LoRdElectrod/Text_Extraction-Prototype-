@@ -6,6 +6,8 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process, fuzz
 from rapidfuzz import process as rapid_process, fuzz as rapid_fuzz
+from metaphone import doublemetaphone
+from collections import Counter
 import re
 
 # Load environment variables
@@ -75,18 +77,40 @@ def parse_medicine_and_quantity(text):
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
 
-    # **Step 1: Check for Exact Match**
+    # **Step 1: Exact Match Check**
     exact_match = [med for med in all_medicines if medicine_name == med.lower()]
     if exact_match:
-        return exact_match[:1]  # Return the exact match
+        return exact_match[:1]  # Return the exact match immediately
 
-    # **Step 2: Use RapidFuzz for High-Accuracy Matching**
-    fuzzy_matches = rapid_process.extract(medicine_name, all_medicines, scorer=rapid_fuzz.token_sort_ratio, limit=limit)
+    # **Step 2: Generate Phonetic Code (Soundex/Metaphone)**
+    medicine_phonetic = doublemetaphone(medicine_name)  # Returns tuple of (primary, secondary)
+    
+    # **Step 3: Compare with Phonetic Matches in DB**
+    phonetic_matches = [
+        med for med in all_medicines 
+        if any(code in doublemetaphone(med.lower()) for code in medicine_phonetic if code)
+    ]
 
-    # **Step 3: Filter out low-confidence matches (keep only strong suggestions)**
-    suggestions = [match[0] for match in fuzzy_matches if match[1] >= 65]  # Keep only high-confidence matches
+    # **Step 4: Find n-gram similarity (character sequence patterns)**
+    def get_ngrams(word, n=3):
+        """Generate n-grams from a word."""
+        return ["".join(word[i:i+n]) for i in range(len(word)-n+1)]
 
-    return list(set(suggestions))  # Remove duplicates
+    medicine_ngrams = Counter(get_ngrams(medicine_name))
+    ngram_matches = [
+        med for med in all_medicines 
+        if sum((Counter(get_ngrams(med.lower())) & medicine_ngrams).values()) > 2
+    ]
+
+    # **Step 5: Use Weighted Fuzzy Matching (More weight to middle letters)**
+    fuzzy_matches = rapid_process.extract(medicine_name, all_medicines, scorer=rapid_fuzz.WRatio, limit=limit)
+    fuzzy_matches = [match[0] for match in fuzzy_matches if match[1] >= 65]
+
+    # **Step 6: Combine All Matches & Remove Duplicates**
+    combined_matches = list(set(phonetic_matches + ngram_matches + fuzzy_matches))
+
+    # **Step 7: Prioritize & Limit**
+    return combined_matches[:limit]
 
 @app.route('/')
 def index():
