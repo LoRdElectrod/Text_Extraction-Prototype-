@@ -6,6 +6,7 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process, fuzz
 from rapidfuzz import process as rapid_process
+from rapidfuzz import fuzz as rapid_fuzz
 import re
 
 # Load environment variables
@@ -80,14 +81,13 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     if exact_match:
         return exact_match[:1]  # Return exact match as highest priority
 
-    # **Step 2: RapidFuzz for Better String Matching**
-    fuzzy_matches = rapid_process.extract(medicine_name, all_medicines, scorer=fuzz.partial_ratio, limit=limit)
+    # **Step 2: Use RapidFuzz for Better Matching**
+    fuzzy_matches = rapid_process.extract(medicine_name, all_medicines, scorer=rapid_fuzz.partial_ratio, limit=limit)
 
     # **Step 3: Filter out low-confidence matches**
-    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Keep matches with >60% similarity
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Keep only high-confidence matches
 
     return list(set(suggestions))  # Remove duplicates
-
 @app.route('/')
 def index():
     return render_template('index.html')
