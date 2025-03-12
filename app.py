@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
 import jellyfish  # For phonetic matching
+from metaphone import doublemetaphone  # Import Metaphone Algorithm
 
 # Load environment variables
 load_dotenv()
@@ -83,9 +84,6 @@ def get_phonetic_code(word):
     """Get the Metaphone encoding of a word for phonetic similarity."""
     return jellyfish.metaphone(word)
 
-# Function to prioritize relevant medicine suggestions
-from fuzzywuzzy import process
-from metaphone import doublemetaphone  # Import Metaphone Algorithm
 
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
