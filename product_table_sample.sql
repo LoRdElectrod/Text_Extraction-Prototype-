@@ -1010,7 +1010,8 @@ INSERT INTO product_table_new (unique_id, medicine) VALUES
 (997, 'UDILIV 600 MG TABLET'),
 (998, 'LINOPLUS 600MG TABLET'),
 (999, 'D3 SHOT 60K CAPSULE'),
-(1000, 'D3 SHOT 60K SACHET');
+(1000, 'D3 SHOT 60K SACHET'),
+(1001, 'Asthalin Inhalor');
 
 -- Create an index on the medicine column for faster searches
 CREATE INDEX idx_medicine ON product_table_new (medicine);
