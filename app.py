@@ -84,22 +84,27 @@ def get_internal_patterns(word):
     """Get internal patterns of a word for better matching."""
     return set(re.findall(r'[a-zA-Z]{2,}', word))
 
+def preprocess_medicine_name(medicine_name):
+    """Standardize the medicine name for better matching."""
+    return re.sub(r'\s+', ' ', medicine_name.strip().lower())
+
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
-    medicine_name = medicine_name.lower()
+    """Get relevant suggestions for the provided medicine name."""
+    medicine_name = preprocess_medicine_name(medicine_name)
     internal_patterns = get_internal_patterns(medicine_name)
 
-    # 1. Fuzzy Matching
+    # 1. Fuzzy Matching (Lower threshold for matching)
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
-    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  # Increased threshold
+    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Reduced threshold
 
     # 2. Substring Matching
     substring_matches = [med for med in all_medicines if medicine_name in med.lower()]
 
-    # 3. Levenshtein Distance Matching
+    # 3. Levenshtein Distance Matching (Using a relaxed distance)
     levenshtein_matches = []
     for med in all_medicines:
         distance = jellyfish.levenshtein_distance(medicine_name, med.lower())
-        if distance <= 2:  # Allow a small number of edits
+        if distance <= 3:  # Allow more edits
             levenshtein_matches.append(med)
 
     # 4. Combine all methods
