@@ -78,28 +78,24 @@ def generate_ngrams(word, n=2):
     word = word.lower()
     return [word[i:i+n] for i in range(len(word)-n+1)]
 
-# Function to prioritize relevant medicine suggestions based on pattern similarity
+# Function to get relevant medicine suggestions based on similarity
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
-    extracted_ngrams = generate_ngrams(medicine_name)
+    
+    # Use fuzzy matching to get the best suggestions
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit, scorer=fuzz.ratio)
 
-    # Score medicines based on common n-grams
-    similarity_scores = []
-    for med in all_medicines:
-        med_ngrams = generate_ngrams(med.lower())
-        common_ngrams = len(set(extracted_ngrams) & set(med_ngrams))
-        similarity_scores.append((med, common_ngrams))
-
-    # Sort by highest similarity score
-    similarity_scores.sort(key=lambda x: x[1], reverse=True)
-
-    # Apply fuzzy matching as a secondary filter
-    fuzzy_matches = process.extract(medicine_name, [med[0] for med in similarity_scores], limit=limit, scorer=fuzz.ratio)
-
-    # Merge results, prioritizing n-gram matching first
-    suggestions = [match[0] for match in similarity_scores[:5] if match[1] > 0] + [match[0] for match in fuzzy_matches if match[1] > 50]
+    # Filter matches with a high similarity score
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 50]
 
     return list(set(suggestions))  # Remove duplicates
+
+# Function to find the best database match
+def get_best_db_match(medicine_name, all_medicines):
+    matches = process.extract(medicine_name, all_medicines, limit=1, scorer=fuzz.ratio)
+    if matches and matches[0][1] > 70:  # Ensure high confidence match
+        return matches[0][0]
+    return "No match found"
 
 @app.route('/process_image', methods=['POST'])
 def process_image():
@@ -147,11 +143,11 @@ def process_image():
             clean_text = clean_extracted_text(item)  # Remove unwanted symbols
             medicine_name, quantity = parse_medicine_and_quantity(clean_text)
 
-            # Get suggestions based on character pattern matching
-            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
+            # Get best match from DB
+            matched_medicine = get_best_db_match(medicine_name, all_medicines)
 
-            # Pick the best match or return "No match found"
-            matched_medicine = suggestions[0] if suggestions else "No match found"
+            # Get suggestions based on similarity
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
             # Add to cart if a match is found
             if matched_medicine != "No match found":
