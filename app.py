@@ -90,16 +90,20 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
 
     # 1. Fuzzy Matching
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
-    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 50]
+    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  # Increased threshold
 
-    # 2. Internal Pattern Matching
-    internal_matches = []
+    # 2. Substring Matching
+    substring_matches = [med for med in all_medicines if medicine_name in med.lower()]
+
+    # 3. Levenshtein Distance Matching
+    levenshtein_matches = []
     for med in all_medicines:
-        if any(pattern in med.lower() for pattern in internal_patterns):
-            internal_matches.append(med)
+        distance = jellyfish.levenshtein_distance(medicine_name, med.lower())
+        if distance <= 2:  # Allow a small number of edits
+            levenshtein_matches.append(med)
 
-    # 3. Combine all methods
-    suggestions = list(set(fuzzy_suggestions + internal_matches))  # Remove duplicates
+    # 4. Combine all methods
+    suggestions = list(set(fuzzy_suggestions + substring_matches + levenshtein_matches))  # Remove duplicates
     return suggestions[:limit]  # Limit to the specified number
 
 # ---------------------------- Flask Routes ----------------------------
