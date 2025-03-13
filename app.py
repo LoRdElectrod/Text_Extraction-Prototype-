@@ -6,8 +6,8 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-import jellyfish  # For phonetic matching
-from metaphone import doublemetaphone  # Import Metaphone Algorithm
+import jellyfish
+from metaphone import doublemetaphone
 
 # Load environment variables
 load_dotenv()
@@ -51,7 +51,7 @@ def fetch_all_medicines():
         results = cursor.fetchall()
         cursor.close()
         connection.close()
-        return [result[0] for result in results]  # Convert to a simple list of medicine names
+        return [result[0] for result in results]
     except Exception as e:
         print(f"Database Error: {e}")
         return []
@@ -78,42 +78,29 @@ def parse_medicine_and_quantity(text):
     match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
     if match:
         return match.group(1).strip(), match.group(2).strip()
-    return text, "1"  # Default quantity if not found
+    return text, "1"
 
-def get_phonetic_code(word):
-    """Get the Metaphone encoding of a word for phonetic similarity."""
-    return jellyfish.metaphone(word)
-
+def get_internal_patterns(word):
+    """Get internal patterns of a word for better matching."""
+    return set(re.findall(r'[a-zA-Z]{2,}', word))
 
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
+    internal_patterns = get_internal_patterns(medicine_name)
 
-    # 1. Standard Prefix Matching (First 3, 2, and 1 characters)
-    three_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:3])]
-    two_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:2])]
-    one_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:1])]
-
-    # 2. Fuzzy Matching
+    # 1. Fuzzy Matching
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
     fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 50]
 
-    # 3. Handle First Character Mistakes (Look at Internal Patterns)
-    without_first_char = medicine_name[1:] if len(medicine_name) > 1 else medicine_name
-    similar_names = [med for med in all_medicines if without_first_char in med.lower()]
+    # 2. Internal Pattern Matching
+    internal_matches = []
+    for med in all_medicines:
+        if any(pattern in med.lower() for pattern in internal_patterns):
+            internal_matches.append(med)
 
-    # 4. Use Metaphone Algorithm for Phonetic Similarity
-    med_phonetic = doublemetaphone(medicine_name)
-    phonetic_matches = [
-        med for med in all_medicines if any(p in doublemetaphone(med) for p in med_phonetic)
-    ]
-
-    # 5. Combine all methods (Priority Order: Prefix → Phonetic → Internal → Fuzzy)
-    suggestions = (
-        three_char_match[:5] or two_char_match[:5] or one_char_match[:5] or 
-        phonetic_matches[:5] or similar_names[:5] or fuzzy_suggestions
-    )
-
-    return list(set(suggestions))  # Remove duplicates
+    # 3. Combine all methods
+    suggestions = list(set(fuzzy_suggestions + internal_matches))  # Remove duplicates
+    return suggestions[:limit]  # Limit to the specified number
 
 # ---------------------------- Flask Routes ----------------------------
 
@@ -155,7 +142,7 @@ def process_image():
             top_p=0.7,
             top_k=50,
             repetition_penalty=1,
-            stop=["<|eot_id|>", "<|eom_id|>"]
+            stop=[" <|eot_id|>", "<|eom_id|>"]
         )
 
         extracted_text = response.choices[0].message.content
@@ -172,19 +159,23 @@ def process_image():
             first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
 
             # Search for exact matches
-            matched_medicines = [med for med in all_medicines if first_word.lower() in med.lower()]
-            matched_medicine = matched_medicines[0] if matched_medicines else "No match found"
+            matched_medicines = [med for med in all_medicines if med.lower() == medicine_name.lower()]
+            matched_medicine = matched_medicines[0] if matched_medicines else "No exact match found"
 
-            # Get suggestions if no match is found
-            suggestions = get_relevant_suggestions(first_word, all_medicines) if matched_medicine == "No match found" else []
+            # Check for first word match
+            first_word_matches = [med for med in all_medicines if med.lower().startswith(first_word.lower())]
 
-            # Add matched item to cart
-            if matched_medicine != "No match found":
+            # Get suggestions if no exact match is found
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines) if matched_medicine == "No exact match found" else []
+
+            # Add matched item to cart if there's a match
+            if matched_medicine != "No exact match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity})
 
             results.append({
                 "extracted_medicine": medicine_name,
                 "matched_medicine": matched_medicine,
+                "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
                 "suggestions": suggestions,
                 "quantity": quantity
             })
