@@ -6,11 +6,13 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-from rapidfuzz import fuzz  # Better for string similarity
-from collections import Counter
+import jellyfish  # For phonetic matching
+from metaphone import doublemetaphone  # Import Metaphone Algorithm
 
 # Load environment variables
 load_dotenv()
+
+# Environment variables
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 IMGUR_CLIENT_ID = os.getenv("IMGUR_CLIENT_ID")
 DB_HOST = os.getenv("DB_HOST")
@@ -22,23 +24,16 @@ DB_PORT = os.getenv("DB_PORT")
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
 
+# Flask app
 app = Flask(__name__, template_folder="templates")
 
+# Temporary cart storage
 cart = []
 
-# Function to upload image to Imgur
-def upload_to_imgur(image_path):
-    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-    with open(image_path, "rb") as image_file:
-        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
-    
-    if response.status_code == 200:
-        return response.json()["data"]["link"]
-    else:
-        raise Exception(f"Imgur upload failed: {response.json()}")
+# ---------------------------- Database Functions ----------------------------
 
-# Function to connect to the database
 def get_db_connection():
+    """Connect to PostgreSQL database."""
     return psycopg2.connect(
         host=DB_HOST,
         user=DB_USER,
@@ -47,76 +42,103 @@ def get_db_connection():
         port=DB_PORT
     )
 
-# Fetch all medicine names from DB
 def fetch_all_medicines():
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    cursor.execute("SELECT medicine FROM product_table_new")
-    results = cursor.fetchall()
-    cursor.close()
-    connection.close()
-    return [result[0] for result in results]  # Extract names as list
+    """Fetch all medicine names from the database."""
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        cursor.execute("SELECT medicine FROM product_table_new")
+        results = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        return [result[0] for result in results]  # Convert to a simple list of medicine names
+    except Exception as e:
+        print(f"Database Error: {e}")
+        return []
 
-# Function to clean extracted text (remove garbage symbols)
+# ---------------------------- Utility Functions ----------------------------
+
+def upload_to_imgur(image_path):
+    """Upload an image to Imgur and return the URL."""
+    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
+    with open(image_path, "rb") as image_file:
+        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
+
+    if response.status_code == 200:
+        return response.json()["data"]["link"]
+    else:
+        raise Exception(f"Imgur upload failed: {response.json()}")
+
 def clean_extracted_text(text):
-    text = re.sub(r"^[^a-zA-Z]+", "", text)  # Remove leading special characters
-    return text.strip()
+    """Remove special characters and unwanted symbols from the extracted text."""
+    return re.sub(r"[^a-zA-Z0-9\s]", "", text).strip()
 
-# Function to parse medicine name and quantity
 def parse_medicine_and_quantity(text):
+    """Extract medicine name and quantity from text."""
     match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
     if match:
-        medicine_name = match.group(1).strip()
-        quantity = match.group(2).strip()
-        return medicine_name, quantity
-    else:
-        return text, "1"
+        return match.group(1).strip(), match.group(2).strip()
+    return text, "1"  # Default quantity if not found
 
-# Generate N-Grams from a word
-def generate_ngrams(word, n=2):
-    """Generate character n-grams for better similarity matching"""
-    word = word.lower()
-    return [word[i:i+n] for i in range(len(word)-n+1)]
+def get_phonetic_code(word):
+    """Get the Metaphone encoding of a word for phonetic similarity."""
+    return jellyfish.metaphone(word)
 
-# Function to prioritize relevant medicine suggestions based on pattern similarity
+
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
-    extracted_ngrams = generate_ngrams(medicine_name)
 
-    # Score medicines based on common n-grams
-    similarity_scores = []
-    for med in all_medicines:
-        med_ngrams = generate_ngrams(med.lower())
-        common_ngrams = len(set(extracted_ngrams) & set(med_ngrams))
-        similarity_scores.append((med, common_ngrams))
+    # 1. Standard Prefix Matching (First 3, 2, and 1 characters)
+    three_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:3])]
+    two_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:2])]
+    one_char_match = [med for med in all_medicines if med.lower().startswith(medicine_name[:1])]
 
-    # Sort by highest similarity score
-    similarity_scores.sort(key=lambda x: x[1], reverse=True)
+    # 2. Fuzzy Matching
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
+    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 50]
 
-    # Apply fuzzy matching as a secondary filter
-    fuzzy_matches = process.extract(medicine_name, [med[0] for med in similarity_scores], limit=limit, scorer=fuzz.ratio)
+    # 3. Handle First Character Mistakes (Look at Internal Patterns)
+    without_first_char = medicine_name[1:] if len(medicine_name) > 1 else medicine_name
+    similar_names = [med for med in all_medicines if without_first_char in med.lower()]
 
-    # Merge results, prioritizing n-gram matching first
-    suggestions = [match[0] for match in similarity_scores[:5] if match[1] > 0] + [match[0] for match in fuzzy_matches if match[1] > 50]
+    # 4. Use Metaphone Algorithm for Phonetic Similarity
+    med_phonetic = doublemetaphone(medicine_name)
+    phonetic_matches = [
+        med for med in all_medicines if any(p in doublemetaphone(med) for p in med_phonetic)
+    ]
+
+    # 5. Combine all methods (Priority Order: Prefix → Phonetic → Internal → Fuzzy)
+    suggestions = (
+        three_char_match[:5] or two_char_match[:5] or one_char_match[:5] or 
+        phonetic_matches[:5] or similar_names[:5] or fuzzy_suggestions
+    )
 
     return list(set(suggestions))  # Remove duplicates
 
+# ---------------------------- Flask Routes ----------------------------
+
+@app.route('/')
+def index():
+    """Render the homepage."""
+    return render_template('index.html')
+
 @app.route('/process_image', methods=['POST'])
 def process_image():
+    """Process the uploaded image and extract medicines."""
     try:
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
 
-        # Save the uploaded image
+        # Save uploaded image
         image_file = request.files['image']
         image_path = f"./temp/{image_file.filename}"
         os.makedirs("./temp", exist_ok=True)
         image_file.save(image_path)
 
-        # Upload to Imgur
+        # Upload image to Imgur
         uploaded_image_url = upload_to_imgur(image_path)
 
-        # Send request to Together AI
+        # Send request to Together AI for OCR
         response = client.chat.completions.create(
             model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
             messages=[
@@ -144,16 +166,19 @@ def process_image():
 
         results = []
         for item in items:
-            clean_text = clean_extracted_text(item)  # Remove unwanted symbols
-            medicine_name, quantity = parse_medicine_and_quantity(clean_text)
+            medicine_name, quantity = parse_medicine_and_quantity(clean_extracted_text(item))
 
-            # Get suggestions based on character pattern matching
-            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
+            # Match using only the first word if it's multi-word
+            first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
 
-            # Pick the best match or return "No match found"
-            matched_medicine = suggestions[0] if suggestions else "No match found"
+            # Search for exact matches
+            matched_medicines = [med for med in all_medicines if first_word.lower() in med.lower()]
+            matched_medicine = matched_medicines[0] if matched_medicines else "No match found"
 
-            # Add to cart if a match is found
+            # Get suggestions if no match is found
+            suggestions = get_relevant_suggestions(first_word, all_medicines) if matched_medicine == "No match found" else []
+
+            # Add matched item to cart
             if matched_medicine != "No match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity})
 
@@ -166,6 +191,21 @@ def process_image():
 
         return jsonify({"results": results, "cart": cart})
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/get_cart', methods=['GET'])
+def get_cart():
+    """Retrieve the cart."""
+    return jsonify({"cart": cart})
+
+@app.route('/remove_from_cart/<int:index>', methods=['DELETE'])
+def remove_from_cart(index):
+    """Remove an item from the cart."""
+    try:
+        if 0 <= index < len(cart):
+            cart.pop(index)
+        return jsonify({"cart": cart})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
