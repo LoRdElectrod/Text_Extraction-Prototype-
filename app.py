@@ -6,7 +6,8 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-from difflib import SequenceMatcher
+from rapidfuzz import fuzz  # Better for string similarity
+from collections import Counter
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +25,17 @@ client = Together(api_key=TOGETHER_API_KEY)
 app = Flask(__name__, template_folder="templates")
 
 cart = []
+
+# Function to upload image to Imgur
+def upload_to_imgur(image_path):
+    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
+    with open(image_path, "rb") as image_file:
+        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
+    
+    if response.status_code == 200:
+        return response.json()["data"]["link"]
+    else:
+        raise Exception(f"Imgur upload failed: {response.json()}")
 
 # Function to connect to the database
 def get_db_connection():
@@ -43,27 +55,16 @@ def fetch_all_medicines():
     results = cursor.fetchall()
     cursor.close()
     connection.close()
-    return [result[0] for result in results]
+    return [result[0] for result in results]  # Extract names as list
 
-def upload_to_imgur(image_path):
-    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-    with open(image_path, "rb") as image_file:
-        image_data = {"image": image_file.read()}
-        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files=image_data)
-    
-    if response.status_code == 200:
-        return response.json()["data"]["link"]
-    else:
-        raise Exception(f"Failed to upload image to Imgur: {response.text}")
-
-# Function to clean extracted text
+# Function to clean extracted text (remove garbage symbols)
 def clean_extracted_text(text):
     text = re.sub(r"^[^a-zA-Z]+", "", text)  # Remove leading special characters
     return text.strip()
 
 # Function to parse medicine name and quantity
 def parse_medicine_and_quantity(text):
-    match = re.match(r"([a-zA-Z\s]+)\s*(\d+mg|\d+)", text, re.IGNORECASE)
+    match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
     if match:
         medicine_name = match.group(1).strip()
         quantity = match.group(2).strip()
@@ -71,33 +72,34 @@ def parse_medicine_and_quantity(text):
     else:
         return text, "1"
 
-# Function to calculate substring similarity
-def get_substring_similarity(str1, str2):
-    matcher = SequenceMatcher(None, str1.lower(), str2.lower())
-    return matcher.ratio()
+# Generate N-Grams from a word
+def generate_ngrams(word, n=2):
+    """Generate character n-grams for better similarity matching"""
+    word = word.lower()
+    return [word[i:i+n] for i in range(len(word)-n+1)]
 
-# Function to find medicine suggestions based on internal pattern matching
-def get_relevant_suggestions(medicine_name, all_medicines, quantity="", limit=5):
+# Function to prioritize relevant medicine suggestions based on pattern similarity
+def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
-    
-    # Step 1: Filter by quantity (if available)
-    filtered_medicines = [med for med in all_medicines if quantity.lower() in med.lower()] if quantity else all_medicines
+    extracted_ngrams = generate_ngrams(medicine_name)
 
-    # Step 2: Apply internal pattern matching using substrings
-    scores = []
-    for med in filtered_medicines:
-        score = get_substring_similarity(medicine_name, med)
-        scores.append((med, score))
-    
-    # Step 3: Sort by best match
-    scores.sort(key=lambda x: x[1], reverse=True)
+    # Score medicines based on common n-grams
+    similarity_scores = []
+    for med in all_medicines:
+        med_ngrams = generate_ngrams(med.lower())
+        common_ngrams = len(set(extracted_ngrams) & set(med_ngrams))
+        similarity_scores.append((med, common_ngrams))
 
-    # Step 4: Return top suggestions
-    return [s[0] for s in scores[:limit] if s[1] > 0.4]  # Only keep meaningful matches
+    # Sort by highest similarity score
+    similarity_scores.sort(key=lambda x: x[1], reverse=True)
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+    # Apply fuzzy matching as a secondary filter
+    fuzzy_matches = process.extract(medicine_name, [med[0] for med in similarity_scores], limit=limit, scorer=fuzz.ratio)
+
+    # Merge results, prioritizing n-gram matching first
+    suggestions = [match[0] for match in similarity_scores[:5] if match[1] > 0] + [match[0] for match in fuzzy_matches if match[1] > 50]
+
+    return list(set(suggestions))  # Remove duplicates
 
 @app.route('/process_image', methods=['POST'])
 def process_image():
@@ -145,14 +147,13 @@ def process_image():
             clean_text = clean_extracted_text(item)  # Remove unwanted symbols
             medicine_name, quantity = parse_medicine_and_quantity(clean_text)
 
-            # Match using only the first word if it's multi-word
-            first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
+            # Get suggestions based on character pattern matching
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
-            # Find relevant suggestions based on internal patterns
-            suggestions = get_relevant_suggestions(first_word, all_medicines, quantity)
-
-            # Auto-add best match to cart if high confidence
+            # Pick the best match or return "No match found"
             matched_medicine = suggestions[0] if suggestions else "No match found"
+
+            # Add to cart if a match is found
             if matched_medicine != "No match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity})
 
@@ -163,24 +164,8 @@ def process_image():
                 "quantity": quantity
             })
 
-        return jsonify({
-            "results": results,
-            "cart": cart
-        })
+        return jsonify({"results": results, "cart": cart})
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/get_cart', methods=['GET'])
-def get_cart():
-    return jsonify({"cart": cart})
-
-@app.route('/remove_from_cart/<int:index>', methods=['DELETE'])
-def remove_from_cart(index):
-    try:
-        if 0 <= index < len(cart):
-            cart.pop(index)
-        return jsonify({"cart": cart})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
