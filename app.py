@@ -1,12 +1,12 @@
 import os
 import psycopg2
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 import requests
 from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz  # Better for string similarity
 from collections import Counter
 
 # Load environment variables
@@ -22,7 +22,7 @@ DB_PORT = os.getenv("DB_PORT")
 # Initialize Together AI client
 client = Together(api_key=TOGETHER_API_KEY)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates")
 
 cart = []
 
@@ -35,8 +35,7 @@ def upload_to_imgur(image_path):
     if response.status_code == 200:
         return response.json()["data"]["link"]
     else:
-        print("Imgur Upload Error:", response.json())  # Debugging
-        raise Exception("Imgur upload failed")
+        raise Exception(f"Imgur upload failed: {response.json()}")
 
 # Function to connect to the database
 def get_db_connection():
@@ -58,7 +57,7 @@ def fetch_all_medicines():
     connection.close()
     return [result[0] for result in results]  # Extract names as list
 
-# Function to clean extracted text
+# Function to clean extracted text (remove garbage symbols)
 def clean_extracted_text(text):
     text = re.sub(r"^[^a-zA-Z]+", "", text)  # Remove leading special characters
     return text.strip()
@@ -67,41 +66,40 @@ def clean_extracted_text(text):
 def parse_medicine_and_quantity(text):
     match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
     if match:
-        return match.group(1).strip(), match.group(2).strip()
-    return text.strip(), "1"
+        medicine_name = match.group(1).strip()
+        quantity = match.group(2).strip()
+        return medicine_name, quantity
+    else:
+        return text, "1"
 
 # Generate N-Grams from a word
 def generate_ngrams(word, n=2):
+    """Generate character n-grams for better similarity matching"""
     word = word.lower()
     return [word[i:i+n] for i in range(len(word)-n+1)]
 
-# Function to find best DB match and suggestions
-def find_best_match(medicine_name, all_medicines):
+# Function to prioritize relevant medicine suggestions based on pattern similarity
+def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = medicine_name.lower()
-    
-    # Primary DB match using best fuzzy ratio
-    best_match, best_score = process.extractOne(medicine_name, all_medicines, scorer=fuzz.ratio)
-    
-    # Generate suggestions using n-grams + fuzzy matching
     extracted_ngrams = generate_ngrams(medicine_name)
+
+    # Score medicines based on common n-grams
     similarity_scores = []
-    
     for med in all_medicines:
         med_ngrams = generate_ngrams(med.lower())
         common_ngrams = len(set(extracted_ngrams) & set(med_ngrams))
         similarity_scores.append((med, common_ngrams))
-    
-    # Sort by n-gram match score
+
+    # Sort by highest similarity score
     similarity_scores.sort(key=lambda x: x[1], reverse=True)
-    
-    # Apply fuzzy matching on top 10 n-gram matches
-    top_n_gram_matches = [match[0] for match in similarity_scores[:10]]
-    fuzzy_matches = process.extract(medicine_name, top_n_gram_matches, limit=5, scorer=fuzz.ratio)
-    
-    # Merge results with threshold
-    suggestions = list({match[0] for match in fuzzy_matches if match[1] > 50})
-    
-    return best_match if best_score > 60 else "No match found", suggestions
+
+    # Apply fuzzy matching as a secondary filter
+    fuzzy_matches = process.extract(medicine_name, [med[0] for med in similarity_scores], limit=limit, scorer=fuzz.ratio)
+
+    # Merge results, prioritizing n-gram matching first
+    suggestions = [match[0] for match in similarity_scores[:5] if match[1] > 0] + [match[0] for match in fuzzy_matches if match[1] > 50]
+
+    return list(set(suggestions))  # Remove duplicates
 
 @app.route('/process_image', methods=['POST'])
 def process_image():
@@ -117,8 +115,6 @@ def process_image():
 
         # Upload to Imgur
         uploaded_image_url = upload_to_imgur(image_path)
-        if not uploaded_image_url:
-            return jsonify({"error": "Imgur upload failed"}), 500
 
         # Send request to Together AI
         response = client.chat.completions.create(
@@ -140,21 +136,24 @@ def process_image():
             stop=["<|eot_id|>", "<|eom_id|>"]
         )
 
-        extracted_text = response.choices[0].message.content.strip()
-        items = extracted_text.split("\n")
+        extracted_text = response.choices[0].message.content
+        items = extracted_text.strip().split("\n")
 
         # Fetch all medicine names from DB
         all_medicines = fetch_all_medicines()
 
         results = []
         for item in items:
-            clean_text = clean_extracted_text(item)
+            clean_text = clean_extracted_text(item)  # Remove unwanted symbols
             medicine_name, quantity = parse_medicine_and_quantity(clean_text)
 
-            # Get best DB match and suggestions
-            matched_medicine, suggestions = find_best_match(medicine_name, all_medicines)
+            # Get suggestions based on character pattern matching
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
-            # Add to cart if matched
+            # Pick the best match or return "No match found"
+            matched_medicine = suggestions[0] if suggestions else "No match found"
+
+            # Add to cart if a match is found
             if matched_medicine != "No match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity})
 
