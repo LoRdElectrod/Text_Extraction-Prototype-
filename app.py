@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
 import jellyfish
-from metaphone import doublemetaphone
 
 # Load environment variables
 load_dotenv()
@@ -71,14 +70,32 @@ def upload_to_imgur(image_path):
 
 def clean_extracted_text(text):
     """Remove special characters and unwanted symbols from the extracted text."""
-    return re.sub(r"[^a-zA-Z0-9\s]", "", text).strip()
+    return re.sub(r"[^a-zA-Z0-9\s%]", "", text).strip()
 
-def parse_medicine_and_quantity(text):
-    """Extract medicine name and quantity from text."""
-    match = re.match(r"([a-zA-Z\s]+)\s*(\d+)", text)
-    if match:
-        return match.group(1).strip(), match.group(2).strip()
-    return text, "1"
+def parse_medicine_power_and_quantity(text):
+    """
+    Extract medicine name, power, and quantity from text.
+    Power is identified by keywords like %, mg, ml, etc.
+    """
+    # Regex to match power (e.g., 1%, 500mg, 10ml)
+    power_pattern = re.compile(r"(\d+)\s*(%|mg|ml|g|kg|mcg|iu|u|units?)", re.IGNORECASE)
+    power_match = power_pattern.search(text)
+
+    # Extract power if found
+    power = power_match.group(0) if power_match else None
+
+    # Remove power from the text to extract medicine name and quantity
+    if power:
+        text = text.replace(power, "").strip()
+
+    # Extract quantity (default to 1 if not found)
+    quantity_match = re.search(r"(\d+)\s*$", text)
+    quantity = quantity_match.group(1) if quantity_match else "1"
+
+    # Extract medicine name (remaining text after removing power and quantity)
+    medicine_name = re.sub(r"\d+$", "", text).strip()
+
+    return medicine_name, power, quantity
 
 def get_internal_patterns(word):
     """Get internal patterns of a word for better matching."""
@@ -91,25 +108,21 @@ def preprocess_medicine_name(medicine_name):
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     """Get relevant suggestions for the provided medicine name."""
     medicine_name = preprocess_medicine_name(medicine_name)
+    first_char = medicine_name[0].lower() if medicine_name else ""
+
+    # Step 1: Generate suggestions using internal patterns and fuzzy matching
     internal_patterns = get_internal_patterns(medicine_name)
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)  # Fetch more matches initially
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Reduced threshold
 
-    # 1. Fuzzy Matching (Lower threshold for matching)
-    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit)
-    fuzzy_suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Reduced threshold
+    # Step 2: Filter suggestions to include only those with the same first character
+    filtered_suggestions = [med for med in suggestions if med.lower().startswith(first_char)]
 
-    # 2. Substring Matching
-    substring_matches = [med for med in all_medicines if medicine_name in med.lower()]
-
-    # 3. Levenshtein Distance Matching (Using a relaxed distance)
-    levenshtein_matches = []
-    for med in all_medicines:
-        distance = jellyfish.levenshtein_distance(medicine_name, med.lower())
-        if distance <= 3:  # Allow more edits
-            levenshtein_matches.append(med)
-
-    # 4. Combine all methods
-    suggestions = list(set(fuzzy_suggestions + substring_matches + levenshtein_matches))  # Remove duplicates
-    return suggestions[:limit]  # Limit to the specified number
+    # Step 3: If filtered suggestions are available, use them; otherwise, fall back to original suggestions
+    if filtered_suggestions:
+        return filtered_suggestions[:limit]  # Limit to the specified number
+    else:
+        return suggestions[:limit]  # Fallback to original suggestions
 
 # ---------------------------- Flask Routes ----------------------------
 
@@ -162,7 +175,9 @@ def process_image():
 
         results = []
         for item in items:
-            medicine_name, quantity = parse_medicine_and_quantity(clean_extracted_text(item))
+            # Clean and parse the extracted text
+            cleaned_text = clean_extracted_text(item)
+            medicine_name, power, quantity = parse_medicine_power_and_quantity(cleaned_text)
 
             # Match using only the first word if it's multi-word
             first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
@@ -179,14 +194,15 @@ def process_image():
 
             # Add matched item to cart if there's a match
             if matched_medicine != "No exact match found":
-                cart.append({"medicine": matched_medicine, "quantity": quantity})
+                cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
 
             results.append({
                 "extracted_medicine": medicine_name,
                 "matched_medicine": matched_medicine,
                 "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
                 "suggestions": suggestions,
-                "quantity": quantity
+                "quantity": quantity,
+                "power": power
             })
 
         return jsonify({"results": results, "cart": cart})
