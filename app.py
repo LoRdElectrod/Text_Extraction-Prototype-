@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
 import jellyfish
+from metaphone import doublemetaphone
 
 # Load environment variables
 load_dotenv()
@@ -110,19 +111,21 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = preprocess_medicine_name(medicine_name)
     first_char = medicine_name[0].lower() if medicine_name else ""
 
-    # Step 1: Generate suggestions using internal patterns and fuzzy matching
-    internal_patterns = get_internal_patterns(medicine_name)
+    # Step 1: Generate suggestions using fuzzy matching
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)  # Fetch more matches initially
-    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Reduced threshold
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  # Increased threshold to 70
 
     # Step 2: Filter suggestions to include only those with the same first character
     filtered_suggestions = [med for med in suggestions if med.lower().startswith(first_char)]
 
-    # Step 3: If filtered suggestions are available, use them; otherwise, fall back to original suggestions
+    # Step 3: If filtered suggestions are available, use them; otherwise, fall back to phonetic matching
     if filtered_suggestions:
         return filtered_suggestions[:limit]  # Limit to the specified number
     else:
-        return suggestions[:limit]  # Fallback to original suggestions
+        # Step 4: Use phonetic matching as a fallback
+        medicine_phonetic = doublemetaphone(medicine_name)[0]  # Get primary phonetic code
+        phonetic_matches = [med for med in all_medicines if doublemetaphone(med)[0] == medicine_phonetic]
+        return phonetic_matches[:limit]  # Limit to the specified number
 
 # ---------------------------- Flask Routes ----------------------------
 
