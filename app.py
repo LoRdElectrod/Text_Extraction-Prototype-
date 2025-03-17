@@ -152,11 +152,11 @@ def process_image():
             top_p=0.7,
             top_k=50,
             repetition_penalty=1,
-            stop=["  "]
+            stop=["<|eot_id|>", "<|eom_id|>"]
         )
 
         # Access the content of the response in the previous format
-        extracted_text = response['choices'][0]['message']['content']  # Reverted line
+        extracted_text = response.choices[0].message.content  # Reverted line
         cleaned_text = clean_extracted_text(extracted_text)
         medicines = cleaned_text.splitlines()
 
