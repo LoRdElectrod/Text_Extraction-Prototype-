@@ -200,5 +200,9 @@ def process_image():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/get_cart', methods=['GET'])
+def get_cart():
+    return jsonify({"cart": cart})
+
 if __name__ == '__main__':
     app.run(debug=True)
