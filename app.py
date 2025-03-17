@@ -122,13 +122,16 @@ def process_image():
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
 
+        # Save uploaded image
         image_file = request.files['image']
-        image_path = f"./temp/{image _file.filename}"
+        image_path = f"./temp/{image_file.filename}"  # Corrected line
         os.makedirs("./temp", exist_ok=True)
         image_file.save(image_path)
 
+        # Upload image to Imgur
         uploaded_image_url = upload_to_imgur(image_path)
 
+        # Send request to Together AI for OCR
         response = client.chat.completions.create(
             model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
             messages=[
@@ -170,7 +173,6 @@ def process_image():
             if matched_medicine != "No exact match found":
                 cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
 
-            # Prepare the results for the four columns
             combined_results = []
             if matched_medicine != "No exact match found":
                 combined_results.append(matched_medicine)
@@ -178,7 +180,6 @@ def process_image():
                 combined_results.extend(first_word_matches)
             combined_results.extend(suggestions)
 
-            # Ensure the combined results have a maximum of 7 items
             combined_results = combined_results[:7]
 
             results.append({
@@ -194,7 +195,7 @@ def process_image():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+        
 @app.route('/get_cart', methods=['GET'])
 def get_cart():
     """Retrieve the cart."""
