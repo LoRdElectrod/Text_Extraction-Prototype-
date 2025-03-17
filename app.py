@@ -93,6 +93,9 @@ def preprocess_medicine_name(medicine_name):
 
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     """Get relevant suggestions for the provided medicine name."""
+    if not medicine_name:  # Check if medicine_name is empty
+        return []
+
     medicine_name = preprocess_medicine_name(medicine_name)
     first_char = medicine_name[0].lower() if medicine_name else ""
 
@@ -158,15 +161,22 @@ def process_image():
         # Access the content of the response in the previous format
         extracted_text = response.choices[0].message.content  # Reverted line
         cleaned_text = clean_extracted_text(extracted_text)
-        medicines = cleaned_text.splitlines()
 
+        # Check if extracted text is empty
+        if not cleaned_text:
+            return jsonify({"error": "No text extracted from the image"}), 400
+
+        medicines = cleaned_text.splitlines()
         all_medicines = fetch_all_medicines()
         results = []
 
         for medicine in medicines:
+            if not medicine.strip():  # Skip empty lines
+                continue
+
             medicine_name, power, quantity = parse_medicine_power_and_quantity(medicine)
             exact_match = next((med for med in all_medicines if med.lower() == medicine_name.lower()), "No exact match found")
-            first_word_matches = [med for med in all_medicines if med.lower().startswith(medicine_name[0].lower())]
+            first_word_matches = [med for med in all_medicines if med.lower().startswith(medicine_name[0].lower())] if medicine_name else []
             suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
             combined_results = []
@@ -189,6 +199,6 @@ def process_image():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-        
+
 if __name__ == '__main__':
     app.run(debug=True)
