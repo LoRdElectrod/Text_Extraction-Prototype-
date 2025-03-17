@@ -1011,7 +1011,32 @@ INSERT INTO product_table_new (unique_id, medicine) VALUES
 (998, 'LINOPLUS 600MG TABLET'),
 (999, 'D3 SHOT 60K CAPSULE'),
 (1000, 'D3 SHOT 60K SACHET'),
-(1001, 'Asthalin Inhalor');
+(1001, 'Asthalin Inhalor'),
+    (1002, 'No-Pill Gel'),
+(1003, 'Tussin DMR (Adult)'),
+(1004, 'Duolin Rotacaps'),
+(1005, 'Vicks VapoRub 155'),
+(1006, 'Gilotrif 100 mg'),
+(1007, 'Hot Water Bag'),
+(1008, 'Olimelt 5 mg'),
+(1009, 'DNS (Dextrose Normal Saline) 500 ml'),
+(1010, 'RL (Ringer\'s Lactate) 500 ml'),
+(1011, 'NS (Normal Saline) 100 ml'),
+(1012, 'NS (Normal Saline) 500 ml'),
+(1013, 'Needle 24G'),
+(1014, 'Intergel'),
+(1015, 'Micropan'),
+(1016, 'Bandage'),
+(1017, 'Kefsol DT'),
+(1018, 'Medisalic Ointment'),
+(1019, 'Gasex Tablet'),
+(1020, 'Coral B Forte'),
+(1021, 'Dabur Bel 62'),
+(1022, 'Binafin 0.5%'),
+(1023, 'Bulcost'),
+(1024, 'Neproher Gel'),
+(1025, 'C-Sagard Mouthwash'),
+(1026, 'Gargle Solution');
 
 -- Create an index on the medicine column for faster searches
 CREATE INDEX idx_medicine ON product_table_new (medicine);
