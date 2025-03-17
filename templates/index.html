@@ -105,6 +105,7 @@
                         <td class="border px-4 py-2">${item.suggestions.join(", ")}</td>
                         <td class="border px-4 py-2">${item.priority_list.join(", ")}</td>
                         <td class="border px-4 py-2">${item.quantity}</td>
+                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) ? item.suggestions.join("<br>") : "None"}</td>
                         <td class="border px-4 py-2">
                             <button onclick="addToCart('${item.extracted_medicine}', ${item.quantity})" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg transition duration-300">Add to Cart</button>
                         </td>
