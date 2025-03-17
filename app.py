@@ -155,7 +155,8 @@ def process_image():
             stop=["  "]
         )
 
-        extracted_text = response['choices'][0]['message']['content']
+        # Access the content of the response correctly
+        extracted_text = response.choices[0].message['content']  # Corrected line
         cleaned_text = clean_extracted_text(extracted_text)
         medicines = cleaned_text.splitlines()
 
@@ -188,6 +189,6 @@ def process_image():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+        
 if __name__ == '__main__':
     app.run(debug=True)
