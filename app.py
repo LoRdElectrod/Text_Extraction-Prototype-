@@ -6,7 +6,6 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-import jellyfish
 from metaphone import doublemetaphone
 
 # Load environment variables
@@ -58,50 +57,6 @@ def fetch_all_medicines():
 
 # ---------------------------- Utility Functions ----------------------------
 
-def upload_to_imgur(image_path):
-    """Upload an image to Imgur and return the URL."""
-    headers = {"Authorization": f"Client-ID {IMGUR_CLIENT_ID}"}
-    with open(image_path, "rb") as image_file:
-        response = requests.post("https://api.imgur.com/3/upload", headers=headers, files={"image": image_file})
-
-    if response.status_code == 200:
-        return response.json()["data"]["link"]
-    else:
-        raise Exception(f"Imgur upload failed: {response.json()}")
-
-def clean_extracted_text(text):
-    """Remove special characters and unwanted symbols from the extracted text."""
-    return re.sub(r"[^a-zA-Z0-9\s%]", "", text).strip()
-
-def parse_medicine_power_and_quantity(text):
-    """
-    Extract medicine name, power, and quantity from text.
-    Power is identified by keywords like %, mg, ml, etc.
-    """
-    # Regex to match power (e.g., 1%, 500mg, 10ml)
-    power_pattern = re.compile(r"(\d+)\s*(%|mg|ml|g|kg|mcg|iu|u|units?)", re.IGNORECASE)
-    power_match = power_pattern.search(text)
-
-    # Extract power if found
-    power = power_match.group(0) if power_match else None
-
-    # Remove power from the text to extract medicine name and quantity
-    if power:
-        text = text.replace(power, "").strip()
-
-    # Extract quantity (default to 1 if not found)
-    quantity_match = re.search(r"(\d+)\s*$", text)
-    quantity = quantity_match.group(1) if quantity_match else "1"
-
-    # Extract medicine name (remaining text after removing power and quantity)
-    medicine_name = re.sub(r"\d+$", "", text).strip()
-
-    return medicine_name, power, quantity
-
-def get_internal_patterns(word):
-    """Get internal patterns of a word for better matching."""
-    return set(re.findall(r'[a-zA-Z]{2,}', word))
-
 def preprocess_medicine_name(medicine_name):
     """Standardize the medicine name for better matching."""
     return re.sub(r'\s+', ' ', medicine_name.strip().lower())
@@ -111,21 +66,20 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = preprocess_medicine_name(medicine_name)
     first_char = medicine_name[0].lower() if medicine_name else ""
 
-    # Step 1: Generate suggestions using fuzzy matching
-    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)  # Fetch more matches initially
-    suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  # Increased threshold to 70
+    # Fuzzy matching
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  
 
-    # Step 2: Filter suggestions to include only those with the same first character
+    # Filter by first character
     filtered_suggestions = [med for med in suggestions if med.lower().startswith(first_char)]
 
-    # Step 3: If filtered suggestions are available, use them; otherwise, fall back to phonetic matching
-    if filtered_suggestions:
-        return filtered_suggestions[:limit]  # Limit to the specified number
-    else:
-        # Step 4: Use phonetic matching as a fallback
-        medicine_phonetic = doublemetaphone(medicine_name)[0]  # Get primary phonetic code
+    # Phonetic matching fallback
+    if not filtered_suggestions:
+        medicine_phonetic = doublemetaphone(medicine_name)[0]
         phonetic_matches = [med for med in all_medicines if doublemetaphone(med)[0] == medicine_phonetic]
-        return phonetic_matches[:limit]  # Limit to the specified number
+        return phonetic_matches[:limit]
+
+    return filtered_suggestions[:limit]
 
 # ---------------------------- Flask Routes ----------------------------
 
@@ -141,16 +95,15 @@ def process_image():
         if 'image' not in request.files:
             return jsonify({"error": "No image file provided"}), 400
 
-        # Save uploaded image
         image_file = request.files['image']
         image_path = f"./temp/{image_file.filename}"
         os.makedirs("./temp", exist_ok=True)
         image_file.save(image_path)
 
-        # Upload image to Imgur
+        # Upload to Imgur
         uploaded_image_url = upload_to_imgur(image_path)
 
-        # Send request to Together AI for OCR
+        # Send to Together AI for OCR
         response = client.chat.completions.create(
             model="meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
             messages=[
@@ -162,69 +115,40 @@ def process_image():
                     ]
                 }
             ],
-            max_tokens=None,
-            temperature=0.7,
-            top_p=0.7,
-            top_k=50,
-            repetition_penalty=1,
-            stop=[" <|eot_id|>", "<|eom_id|>"]
+            max_tokens=None
         )
 
         extracted_text = response.choices[0].message.content
         items = extracted_text.strip().split("\n")
 
-        # Fetch all medicine names from DB
         all_medicines = fetch_all_medicines()
-
         results = []
+
         for item in items:
-            # Clean and parse the extracted text
-            cleaned_text = clean_extracted_text(item)
-            medicine_name, power, quantity = parse_medicine_power_and_quantity(cleaned_text)
-
-            # Match using only the first word if it's multi-word
+            medicine_name = preprocess_medicine_name(item)
+            exact_match = next((med for med in all_medicines if med.lower() == medicine_name), None)
             first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
-
-            # Search for exact matches
-            matched_medicines = [med for med in all_medicines if med.lower() == medicine_name.lower()]
-            matched_medicine = matched_medicines[0] if matched_medicines else "No exact match found"
-
-            # Check for first word match
             first_word_matches = [med for med in all_medicines if med.lower().startswith(first_word.lower())]
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
-            # Get suggestions if no exact match is found
-            suggestions = get_relevant_suggestions(medicine_name, all_medicines) if matched_medicine == "No exact match found" else []
-
-            # Add matched item to cart if there's a match
-            if matched_medicine != "No exact match found":
-                cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
+            # Priority order list (always 7 elements)
+            priority_list = []
+            if exact_match:
+                priority_list.append(exact_match)
+            priority_list.extend(first_word_matches[:7 - len(priority_list)])
+            priority_list.extend(suggestions[:7 - len(priority_list)])
+            priority_list = priority_list[:7]  # Ensure only 7 items
 
             results.append({
                 "extracted_medicine": medicine_name,
-                "matched_medicine": matched_medicine,
-                "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
-                "suggestions": suggestions,
-                "quantity": quantity,
-                "power": power
+                "exact_match": exact_match or "No exact match",
+                "suggestions": suggestions[:5],
+                "priority_list": priority_list,
+                "quantity": "1"
             })
 
         return jsonify({"results": results, "cart": cart})
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/get_cart', methods=['GET'])
-def get_cart():
-    """Retrieve the cart."""
-    return jsonify({"cart": cart})
-
-@app.route('/remove_from_cart/<int:index>', methods=['DELETE'])
-def remove_from_cart(index):
-    """Remove an item from the cart."""
-    try:
-        if 0 <= index < len(cart):
-            cart.pop(index)
-        return jsonify({"cart": cart})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
