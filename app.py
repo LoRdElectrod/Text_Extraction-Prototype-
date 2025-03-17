@@ -6,7 +6,6 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
-import jellyfish
 from metaphone import doublemetaphone
 
 # Load environment variables
@@ -97,16 +96,21 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     medicine_name = preprocess_medicine_name(medicine_name)
     first_char = medicine_name[0].lower() if medicine_name else ""
 
+    # Step 1: Generate suggestions using fuzzy matching
     fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)
-    suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Lowered threshold to 60
+
+    # Step 2: Filter suggestions to include only those with the same first character
     filtered_suggestions = [med for med in suggestions if med.lower().startswith(first_char)]
 
+    # Step 3: If filtered suggestions are available, use them; otherwise, fall back to phonetic matching
     if filtered_suggestions:
-        return filtered_suggestions[:limit]
+        return filtered_suggestions[:limit]  # Limit to the specified number
     else:
-        medicine_phonetic = doublemetaphone(medicine_name)[0]
+        # Step 4: Use phonetic matching as a fallback
+        medicine_phonetic = doublemetaphone(medicine_name)[0]  # Get primary phonetic code
         phonetic_matches = [med for med in all_medicines if doublemetaphone(med)[0] == medicine_phonetic]
-        return phonetic_matches[:limit]
+        return phonetic_matches[:limit]  # Limit to the specified number
 
 # ---------------------------- Flask Routes ----------------------------
 
@@ -124,7 +128,7 @@ def process_image():
 
         # Save uploaded image
         image_file = request.files['image']
-        image_path = f"./temp/{image_file.filename}"  # Corrected line
+        image_path = f"./temp/{image_file.filename}"
         os.makedirs("./temp", exist_ok=True)
         image_file.save(image_path)
 
@@ -148,66 +152,40 @@ def process_image():
             top_p=0.7,
             top_k=50,
             repetition_penalty=1,
-            stop=[" <|eot_id|>", "<|eom_id|>"]
+            stop=["  "]
         )
 
-        extracted_text = response.choices[0].message.content
-        items = extracted_text.strip().split("\n")
+        extracted_text = response['choices'][0]['message']['content']
+        cleaned_text = clean_extracted_text(extracted_text)
+        medicines = cleaned_text.splitlines()
 
         all_medicines = fetch_all_medicines()
-
         results = []
-        for item in items:
-            cleaned_text = clean_extracted_text(item)
-            medicine_name, power, quantity = parse_medicine_power_and_quantity(cleaned_text)
 
-            first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
-
-            matched_medicines = [med for med in all_medicines if med.lower() == medicine_name.lower()]
-            matched_medicine = matched_medicines[0] if matched_medicines else "No exact match found"
-
-            first_word_matches = [med for med in all_medicines if med.lower().startswith(first_word.lower())]
-
-            suggestions = get_relevant_suggestions(medicine_name, all_medicines) if matched_medicine == "No exact match found" else []
-
-            if matched_medicine != "No exact match found":
-                cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
+        for medicine in medicines:
+            medicine_name, power, quantity = parse_medicine_power_and_quantity(medicine)
+            exact_match = next((med for med in all_medicines if med.lower() == medicine_name.lower()), "No exact match found")
+            first_word_matches = [med for med in all_medicines if med.lower().startswith(medicine_name[0].lower())]
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
 
             combined_results = []
-            if matched_medicine != "No exact match found":
-                combined_results.append(matched_medicine)
+            if exact_match != "No exact match found":
+                combined_results.append(exact_match)
             if first_word_matches:
-                combined_results.extend(first_word_matches)
-            combined_results.extend(suggestions)
-
-            combined_results = combined_results[:7]
+                combined_results.extend(first_word_matches[:7 - len(combined_results)])  # Limit to remaining space
+            if len(combined_results) < 7:
+                combined_results.extend(suggestions[:7 - len(combined_results)])  # Fill remaining space with suggestions
 
             results.append({
-                "extracted_medicine": medicine_name,
-                "matched_medicine": matched_medicine,
-                "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
+                "extracted_name": medicine_name,
+                "exact_db_match": exact_match,
+                "first_word_match": first_word_matches,
                 "combined_results": combined_results,
-                "quantity": quantity,
-                "power": power
+                "quantity": quantity
             })
 
-        return jsonify({"results": results, "cart": cart})
+        return jsonify(results)
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-        
-@app.route('/get_cart', methods=['GET'])
-def get_cart():
-    """Retrieve the cart."""
-    return jsonify({"cart": cart})
-
-@app.route('/remove_from_cart/<int:index>', methods=['DELETE'])
-def remove_from_cart(index):
-    """Remove an item from the cart."""
-    try:
-        if 0 <= index < len(cart):
-            cart.pop(index)
-        return jsonify({"cart": cart})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
