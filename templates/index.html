@@ -12,8 +12,10 @@
         <h2 class="text-3xl font-bold text-blue-600 mb-6 text-center">Upload Prescription</h2>
 
         <form id="uploadForm" class="space-y-4" enctype="multipart/form-data">
-            <input type="file" id="imageFile" name="image" accept=".jpg, .jpeg" class="block w-full border border-gray-300 p-3 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">Extract Medicine Names</button>
+            <input type="file" id="imageFile" name="image" accept=".jpg, .jpeg, .png" class="block w-full border border-gray-300 p-3 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">
+                Extract Medicine Names
+            </button>
         </form>
 
         <button onclick="openCartPage()" class="mt-4 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-6 rounded-lg w-full transition duration-300">
@@ -28,11 +30,11 @@
                 <table class="w-full text-left border-collapse border border-gray-300 shadow-sm rounded-lg">
                     <thead>
                         <tr class="bg-blue-100 text-gray-700">
-                            <th class="border px-4 py-2">Extracted Name</th>
-                            <th class="border px-4 py-2">Exact DB Match</th>
-                            <th class="border px-4 py-2">First Word Match</th>
+                            <th class="border px-4 py-2">Extracted & Exact Match</th>
                             <th class="border px-4 py-2">Suggestions</th>
+                            <th class="border px-4 py-2">Priority List (7 items)</th>
                             <th class="border px-4 py-2">Quantity</th>
+                            <th class="border px-4 py-2">Action</th>
                         </tr>
                     </thead>
                     <tbody id="resultTable"></tbody>
@@ -41,6 +43,7 @@
         </div>
     </div>
 
+    <!-- CART MODAL -->
     <div id="cartPage" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center p-6">
         <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] overflow-y-auto">
             <h2 class="text-3xl font-bold text-blue-600 mb-6 text-center">Your Cart</h2>
@@ -98,17 +101,19 @@
                 data.results.forEach(item => {
                     const row = document.createElement("tr");
                     row.innerHTML = `
-                        <td class="border px-4 py-2">${item.extracted_medicine}</td>
-                        <td class="border px-4 py-2">${item.matched_medicine}</td>
-                        <td class="border px-4 py-2">${item.first_word_match}</td>
-                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) ? item.suggestions.join("<br>") : "None"}</td>
+                        <td class="border px-4 py-2">${item.extracted_medicine} <br><strong>(${item.exact_match})</strong></td>
+                        <td class="border px-4 py-2">${item.suggestions.join(", ")}</td>
+                        <td class="border px-4 py-2">${item.priority_list.join(", ")}</td>
                         <td class="border px-4 py-2">${item.quantity}</td>
+                        <td class="border px-4 py-2">
+                            <button onclick="addToCart('${item.extracted_medicine}', ${item.quantity})" class="bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded-lg transition duration-300">Add to Cart</button>
+                        </td>
                     `;
                     resultTable.appendChild(row);
                 });
 
                 document.getElementById("resultContainer").classList.remove("hidden");
-                fetchCart(); // Update the cart after adding items
+                fetchCart();
 
             } catch (error) {
                 alert("Error processing request.");
@@ -118,7 +123,7 @@
 
         function openCartPage() {
             document.getElementById("cartPage").classList.remove("hidden");
-            fetchCart(); // Fetch and display the cart items
+            fetchCart();
         }
 
         function closeCartPage() {
@@ -128,7 +133,7 @@
         function updateCartTable(cart) {
             const cartTable = document.getElementById("cartTable");
             cartTable.innerHTML = "";
-            
+
             cart.forEach((item, index) => {
                 const row = document.createElement("tr");
                 row.innerHTML = `
@@ -142,13 +147,25 @@
             });
         }
 
-        async function removeFromCart(index) {
+        async function addToCart(medicine, quantity) {
             try {
-                const response = await fetch (`/remove_from_cart/${index}`, {
-                    method: "DELETE",
+                const response = await fetch("/add_to_cart", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ medicine, quantity })
                 });
                 const data = await response.json();
-                updateCartTable(data.cart); // Update the cart table after removal
+                updateCartTable(data.cart);
+            } catch (error) {
+                console.error("Error adding to cart:", error);
+            }
+        }
+
+        async function removeFromCart(index) {
+            try {
+                const response = await fetch(`/remove_from_cart/${index}`, { method: "DELETE" });
+                const data = await response.json();
+                updateCartTable(data.cart);
             } catch (error) {
                 console.error("Error removing item from cart:", error);
             }
@@ -164,7 +181,6 @@
             }
         }
 
-        // Fetch cart on page load
         fetchCart();
     </script>
 
