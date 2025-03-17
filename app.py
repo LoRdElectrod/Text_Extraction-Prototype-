@@ -6,6 +6,7 @@ from together import Together
 from dotenv import load_dotenv
 from fuzzywuzzy import process
 import re
+import jellyfish
 from metaphone import doublemetaphone
 
 # Load environment variables
@@ -73,19 +74,33 @@ def clean_extracted_text(text):
     return re.sub(r"[^a-zA-Z0-9\s%]", "", text).strip()
 
 def parse_medicine_power_and_quantity(text):
-    """Extract medicine name, power, and quantity from text."""
+    """
+    Extract medicine name, power, and quantity from text.
+    Power is identified by keywords like %, mg, ml, etc.
+    """
+    # Regex to match power (e.g., 1%, 500mg, 10ml)
     power_pattern = re.compile(r"(\d+)\s*(%|mg|ml|g|kg|mcg|iu|u|units?)", re.IGNORECASE)
     power_match = power_pattern.search(text)
+
+    # Extract power if found
     power = power_match.group(0) if power_match else None
 
+    # Remove power from the text to extract medicine name and quantity
     if power:
         text = text.replace(power, "").strip()
 
+    # Extract quantity (default to 1 if not found)
     quantity_match = re.search(r"(\d+)\s*$", text)
     quantity = quantity_match.group(1) if quantity_match else "1"
+
+    # Extract medicine name (remaining text after removing power and quantity)
     medicine_name = re.sub(r"\d+$", "", text).strip()
 
     return medicine_name, power, quantity
+
+def get_internal_patterns(word):
+    """Get internal patterns of a word for better matching."""
+    return set(re.findall(r'[a-zA-Z]{2,}', word))
 
 def preprocess_medicine_name(medicine_name):
     """Standardize the medicine name for better matching."""
@@ -93,15 +108,12 @@ def preprocess_medicine_name(medicine_name):
 
 def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
     """Get relevant suggestions for the provided medicine name."""
-    if not medicine_name:  # Check if medicine_name is empty
-        return []
-
     medicine_name = preprocess_medicine_name(medicine_name)
     first_char = medicine_name[0].lower() if medicine_name else ""
 
     # Step 1: Generate suggestions using fuzzy matching
-    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)
-    suggestions = [match[0] for match in fuzzy_matches if match[1] > 60]  # Lowered threshold to 60
+    fuzzy_matches = process.extract(medicine_name, all_medicines, limit=limit * 2)  # Fetch more matches initially
+    suggestions = [match[0] for match in fuzzy_matches if match[1] > 70]  # Increased threshold to 70
 
     # Step 2: Filter suggestions to include only those with the same first character
     filtered_suggestions = [med for med in suggestions if med.lower().startswith(first_char)]
@@ -155,54 +167,66 @@ def process_image():
             top_p=0.7,
             top_k=50,
             repetition_penalty=1,
-            stop=["<|eot_id|>", "<|eom_id|>"]
+            stop=[" <|eot_id|>", "<|eom_id|>"]
         )
 
-        # Access the content of the response in the previous format
-        extracted_text = response.choices[0].message.content  # Reverted line
-        cleaned_text = clean_extracted_text(extracted_text)
+        extracted_text = response.choices[0].message.content
+        items = extracted_text.strip().split("\n")
 
-        # Check if extracted text is empty
-        if not cleaned_text:
-            return jsonify({"error": "No text extracted from the image"}), 400
-
-        medicines = cleaned_text.splitlines()
+        # Fetch all medicine names from DB
         all_medicines = fetch_all_medicines()
+
         results = []
+        for item in items:
+            # Clean and parse the extracted text
+            cleaned_text = clean_extracted_text(item)
+            medicine_name, power, quantity = parse_medicine_power_and_quantity(cleaned_text)
 
-        for medicine in medicines:
-            if not medicine.strip():  # Skip empty lines
-                continue
+            # Match using only the first word if it's multi-word
+            first_word = medicine_name.split()[0] if " " in medicine_name else medicine_name
 
-            medicine_name, power, quantity = parse_medicine_power_and_quantity(medicine)
-            exact_match = next((med for med in all_medicines if med.lower() == medicine_name.lower()), "No exact match found")
-            first_word_matches = [med for med in all_medicines if med.lower().startswith(medicine_name[0].lower())] if medicine_name else []
-            suggestions = get_relevant_suggestions(medicine_name, all_medicines)
+            # Search for exact matches
+            matched_medicines = [med for med in all_medicines if med.lower() == medicine_name.lower()]
+            matched_medicine = matched_medicines[0] if matched_medicines else "No exact match found"
 
-            combined_results = []
-            if exact_match != "No exact match found":
-                combined_results.append(exact_match)
-            if first_word_matches:
-                combined_results.extend(first_word_matches[:7 - len(combined_results)])  # Limit to remaining space
-            if len(combined_results) < 7:
-                combined_results.extend(suggestions[:7 - len(combined_results)])  # Fill remaining space with suggestions
+            # Check for first word match
+            first_word_matches = [med for med in all_medicines if med.lower().startswith(first_word.lower())]
+
+            # Get suggestions if no exact match is found
+            suggestions = get_relevant_suggestions(medicine_name, all_medicines) if matched_medicine == "No exact match found" else []
+
+            # Add matched item to cart if there's a match
+            if matched_medicine != "No exact match found":
+                cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
 
             results.append({
-                "extracted_name": medicine_name,
-                "exact_db_match": exact_match,
-                "first_word_match": first_word_matches,
-                "combined_results": combined_results,
-                "quantity": quantity
+                "extracted_medicine": medicine_name,
+                "matched_medicine": matched_medicine,
+                "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
+                "suggestions": suggestions,
+                "quantity": quantity,
+                "power": power
             })
 
-        return jsonify(results)
+        return jsonify({"results": results, "cart": cart})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/get_cart', methods=['GET'])
 def get_cart():
+    """Retrieve the cart."""
     return jsonify({"cart": cart})
+
+@app.route('/remove_from_cart/<int:index>', methods=['DELETE'])
+def remove_from_cart(index):
+    """Remove an item from the cart."""
+    try:
+        if 0 <= index < len(cart):
+            cart.pop(index)
+        return jsonify({"cart": cart})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
