@@ -31,7 +31,7 @@
                             <th class="border px-4 py-2">Extracted Name</th>
                             <th class="border px-4 py-2">Exact DB Match</th>
                             <th class="border px-4 py-2">First Word Match</th>
-                            <th class="border px-4 py-2">Combined Results</th>
+                            <th class="border px-4 py-2">Suggestions</th>
                             <th class="border px-4 py-2">Quantity</th>
                         </tr>
                     </thead>
@@ -101,7 +101,7 @@
                         <td class="border px-4 py-2">${item.extracted_medicine}</td>
                         <td class="border px-4 py-2">${item.matched_medicine}</td>
                         <td class="border px-4 py-2">${item.first_word_match}</td>
-                        <td class="border px-4 py-2">${item.combined_results.join("<br>")}</td>
+                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) ? item.suggestions.join("<br>") : "None"}</td>
                         <td class="border px-4 py-2">${item.quantity}</td>
                     `;
                     resultTable.appendChild(row);
@@ -144,7 +144,7 @@
 
         async function removeFromCart(index) {
             try {
-                const response = await fetch(`/remove_from_cart/${index}`, {
+                const response = await fetch (`/remove_from_cart/${index}`, {
                     method: "DELETE",
                 });
                 const data = await response.json();
