@@ -155,8 +155,8 @@ def process_image():
             stop=["  "]
         )
 
-        # Access the content of the response correctly
-        extracted_text = response.choices[0].message['content']  # Corrected line
+        # Access the content of the response in the previous format
+        extracted_text = response['choices'][0]['message']['content']  # Reverted line
         cleaned_text = clean_extracted_text(extracted_text)
         medicines = cleaned_text.splitlines()
 
