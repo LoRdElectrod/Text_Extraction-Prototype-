@@ -97,19 +97,14 @@
                 data.results.forEach(item => {
                     const row = document.createElement("tr");
                     row.innerHTML = `
-                        <td class="border px-4 py-2">${item.extracted_medicine || "Not Recognized"}</td>
-                        <td class="border px-4 py-2">${item.matched_medicine} <br> <strong>First Match:</strong> ${item.first_word_match}</td>
-                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) && item.suggestions.length > 0 ? item.suggestions.join("<br>") : "No suggestions"}</td>
-                        <td class="border px-4 py-2">
-                            <ul class="list-disc pl-4">
-                                ${item.prioritized_results.map(result => `<li>${result}</li>`).join("")}
-                            </ul>
-                        </td>
-                        <td class="border px-4 py-2">${item.quantity}</td>
+                        <td class="border px-4 py-2">${item.extracted_medicine || "Not Recognized"}</td>  
+                        <td class="border px-4 py-2">${item.matched_medicine} <br> First Match: ${item.first_word_match}</td>
+                        <td class="border px-4 py-2">${Array.isArray(item.suggestions) ? item.suggestions.join("<br>") : "None"}</td>
+                        <td class="border px-4 py-2">${Array.isArray(item.prioritized_results) ? item.prioritized_results.join("<br>") : "None"}</td>
+                        <td class="border px-4 py-2">${item.quantity || "Unknown"}</td>
                     `;
                     resultTable.appendChild(row);
                 });
-
                 document.getElementById("resultContainer").classList.remove("hidden");
                 fetchCart(); // Update the cart after adding items
 
