@@ -74,26 +74,17 @@ def clean_extracted_text(text):
     return re.sub(r"[^a-zA-Z0-9\s%]", "", text).strip()
 
 def parse_medicine_power_and_quantity(text):
-    """
-    Extract medicine name, power, and quantity from text.
-    Power is identified by keywords like %, mg, ml, etc.
-    """
-    # Regex to match power (e.g., 1%, 500mg, 10ml)
+    """Extract medicine name, power, and quantity from text."""
     power_pattern = re.compile(r"(\d+)\s*(%|mg|ml|g|kg|mcg|iu|u|units?)", re.IGNORECASE)
     power_match = power_pattern.search(text)
-
-    # Extract power if found
     power = power_match.group(0) if power_match else None
 
-    # Remove power from the text to extract medicine name and quantity
     if power:
         text = text.replace(power, "").strip()
 
-    # Extract quantity (default to 1 if not found)
     quantity_match = re.search(r"(\d+)\s*$", text)
     quantity = quantity_match.group(1) if quantity_match else "1"
 
-    # Extract medicine name (remaining text after removing power and quantity)
     medicine_name = re.sub(r"\d+$", "", text).strip()
 
     return medicine_name, power, quantity
@@ -128,36 +119,21 @@ def get_relevant_suggestions(medicine_name, all_medicines, limit=5):
         return phonetic_matches[:limit]  # Limit to the specified number
 
 def prioritize_results(matched_medicine, first_word_matches, suggestions):
-    """
-    Prioritizes medicine suggestions based on exact match, first-word match, and additional suggestions.
-    
-    Parameters:
-    - matched_medicine (str or None): The exact match found in the database (if any).
-    - first_word_matches (list): A list of medicines that start with the first word of extracted medicine.
-    - suggestions (list): Alternative medicine suggestions.
-
-    Returns:
-    - List[str]: A prioritized list of medicine names (max 7 items).
-    """
-
+    """Prioritize medicine suggestions."""
     prioritized_list = []
 
-    # Step 1: If an exact match is found, put it first
     if matched_medicine and matched_medicine != "No exact match found":
         prioritized_list.append(matched_medicine)
 
-    # Step 2: Add first-word matches (ensure no duplicates)
     for match in first_word_matches:
         if match not in prioritized_list:
             prioritized_list.append(match)
 
-    # Step 3: Add suggestions (ensure no duplicates)
     for suggestion in suggestions:
         if suggestion not in prioritized_list:
             prioritized_list.append(suggestion)
 
-    # Limit the results to a maximum of 7 suggestions
-    return prioritized_list[:7]
+    return prioritized_list[:7]  # Limit to max 7 results
 # ---------------------------- Flask Routes ----------------------------
 
 @app.route('/')
@@ -202,12 +178,12 @@ def process_image():
         )
 
         # Extract text safely
-        extracted_text = response.choices[0].message.content if response.choices and response.choices[0].message.content else ""
+        extracted_text = response.choices[0].message.content.strip() if response.choices and response.choices[0].message.content else ""
 
-        if not extracted_text.strip():
+        if not extracted_text:
             return jsonify({"error": "No text extracted from the image"}), 400
 
-        items = extracted_text.strip().split("\n")
+        items = extracted_text.split("\n")
 
         # Fetch all medicine names from DB
         all_medicines = fetch_all_medicines()
@@ -219,9 +195,7 @@ def process_image():
             medicine_name, power, quantity = parse_medicine_power_and_quantity(cleaned_text)
 
             extracted_medicine = medicine_name if medicine_name else "Not recognized"
-            # Match using only the first word if it's multi-word
             first_word = extracted_medicine.split()[0] if " " in extracted_medicine else extracted_medicine
-
 
             # Search for exact matches
             matched_medicines = [med for med in all_medicines if med.lower() == medicine_name.lower()]
@@ -241,12 +215,12 @@ def process_image():
                 cart.append({"medicine": matched_medicine, "quantity": quantity, "power": power})
 
             results.append({
-                    "extracted_medicine": extracted_medicine,  # ✅ Ensure this is assigned correctly
-                    "matched_medicine": matched_medicine,
-                    "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
-                    "suggestions": suggestions,
-                    "prioritized_results": prioritized_results,
-                    "quantity": quantity
+                "extracted_medicine": extracted_medicine,
+                "matched_medicine": matched_medicine,
+                "first_word_match": first_word_matches[0] if first_word_matches else "No first word match",
+                "suggestions": suggestions,
+                "prioritized_results": prioritized_results,
+                "quantity": quantity
             })
         return jsonify({"results": results, "cart": cart})
 
